@@ -32,6 +32,24 @@ BANNER_HEIGHT = 256
 TEXT_GLOBE_RATIO = 0.6
 
 
+# XML ElementTree setup.
+NAMESPACES = {"svg": "http://www.w3.org/2000/svg"}
+ET.register_namespace("", NAMESPACES["svg"])
+
+
+class SvgNamedElement(ET.Element):
+    def __init__(self, id, tag, is_def=False, attrib={}, **extra):
+        """
+        `ET.Element` with extra properties to help construct SVG.
+        id = mandatory `id` string in `attrib` dict, referencable as a class attribute.
+        is_def = attrib denoting whether to store in the SVG `defs` section.
+        """
+        super().__init__(tag, attrib, **extra)
+        self.id = id
+        self.attrib["id"] = self.id
+        self.is_def = is_def
+
+
 def _svg_clip():
     """Generate the clip for masking the entire logo contents."""
     # SVG string representing bezier curves, drawn in a GUI then size-converted
@@ -87,27 +105,22 @@ def _svg_clip():
     )
     original_size_xy = np.array([133.334, 131.521])
     scaling = LOGO_SIZE / max(original_size_xy)
-    clip = ET.Element("clipPath")
+    clip = SvgNamedElement(id="iris_clip", tag="clipPath", is_def=True)
     clip.append(
         ET.Element(
             "path", attrib={"d": path_string, "transform": f"scale({scaling})"}
         )
     )
-    return {"iris_clip": clip, "original_size_xy": original_size_xy}
+    return clip, original_size_xy
 
 
 def _svg_background():
     """Generate the background rectangle for the logo."""
-    background = ET.Element(
-        "rect",
-        attrib={
-            "height": "100%",
-            "width": "100%",
-            "fill": "url(#background_gradient)",
-        },
-    )
-    gradient = ET.Element(
-        "linearGradient", attrib={"y1": "0%", "y2": "100%",},
+    gradient = SvgNamedElement(
+        id="background_gradient",
+        tag="linearGradient",
+        is_def=True,
+        attrib={"y1": "0%", "y2": "100%",},
     )
     gradient.extend(
         [
@@ -122,22 +135,24 @@ def _svg_background():
             ),
         ]
     )
-    return {"background": background, "background_gradient": gradient}
+    background = SvgNamedElement(
+        id="background",
+        tag="rect",
+        attrib={
+            "height": "100%",
+            "width": "100%",
+            "fill": f"url(#{gradient.id})",
+        },
+    )
+    return [background, gradient]
 
 
 def _svg_sea():
     """Generate the circle representing the globe's sea in the logo."""
     # Not using Cartopy for sea since it doesn't actually render curves/circles.
-    sea = ET.Element(
-        "circle",
-        attrib={
-            "cx": "50%",
-            "cy": "50%",
-            "r": f"{50.5 / CLIP_GLOBE_RATIO}%",
-            "fill": "url(#sea_gradient)",
-        },
+    gradient = SvgNamedElement(
+        id="sea_gradient", tag="radialGradient", is_def=True
     )
-    gradient = ET.Element("radialGradient")
     gradient.extend(
         [
             ET.Element(
@@ -148,26 +163,25 @@ def _svg_sea():
             ),
         ]
     )
-    return {"sea": sea, "sea_gradient": gradient}
+    sea = SvgNamedElement(
+        id="sea",
+        tag="circle",
+        attrib={
+            "cx": "50%",
+            "cy": "50%",
+            "r": f"{50.5 / CLIP_GLOBE_RATIO}%",
+            "fill": f"url(#{gradient.id})",
+        },
+    )
+    return [sea, gradient]
 
 
 def _svg_glow():
     """Generate the coloured glow to go behind the globe in the logo."""
-    glow = ET.Element(
-        "circle",
-        attrib={
-            "cx": "50%",
-            "cy": "50%",
-            "r": f"{52 / CLIP_GLOBE_RATIO}%",
-            "fill": "url(#glow_gradient)",
-            "filter": "url(#glow_blur)",
-            "stroke": "#ffffff",
-            "stroke-width": "2",
-            "stroke-opacity": "0.797414",
-        },
-    )
-    gradient = ET.Element(
-        "radialGradient",
+    gradient = SvgNamedElement(
+        id="glow_gradient",
+        tag="radialGradient",
+        is_def=True,
         attrib={
             "gradientTransform": "scale(1.15, 1.35), translate(-0.1, -0.3)"
         },
@@ -195,9 +209,23 @@ def _svg_glow():
             ),
         ]
     )
-    blur = ET.Element("filter")
+    blur = SvgNamedElement(id="glow_blur", tag="filter", is_def=True)
     blur.append(ET.Element("feGaussianBlur", attrib={"stdDeviation": "14"}))
-    return {"glow": glow, "glow_gradient": gradient, "glow_blur": blur}
+    glow = SvgNamedElement(
+        id="glow",
+        tag="circle",
+        attrib={
+            "cx": "50%",
+            "cy": "50%",
+            "r": f"{52 / CLIP_GLOBE_RATIO}%",
+            "fill": f"url(#{gradient.id})",
+            "filter": f"url(#{blur.id})",
+            "stroke": "#ffffff",
+            "stroke-width": "2",
+            "stroke-opacity": "0.797414",
+        },
+    )
+    return [glow, gradient, blur]
 
 
 def _svg_land(logo_size_xy, logo_centre_xy, rotate=False):
@@ -239,6 +267,7 @@ def _svg_land(logo_size_xy, logo_centre_xy, rotate=False):
         f"{logo_centre_xy[1]})"
     )
 
+    land_clip_id = "land_clip"
     for lon in rotation_longitudes:
         # Use Matplotlib and Cartopy to generate land-shaped SVG clips for each longitude.
         projection_rotated = ccrs.Orthographic(
@@ -262,29 +291,25 @@ def _svg_land(logo_size_xy, logo_centre_xy, rotate=False):
         svg_mpl = ET.fromstring(svg_bytes.getvalue())
 
         # Find land paths and convert to clip paths.
-        namespaces = {"svg": "http://www.w3.org/2000/svg"}
-        mpl_land = svg_mpl.find(".//svg:g[@id='figure_1']", namespaces)
-        land_paths = mpl_land.find(
-            ".//svg:g[@id='PathCollection_1']", namespaces
+        land_clip = SvgNamedElement(
+            id=land_clip_id,
+            tag="clipPath",
+            is_def=True,
+            attrib={"transform": transform_string},
         )
-        for path in land_paths:
+        mpl_land = svg_mpl.find(".//svg:g[@id='figure_1']", NAMESPACES)
+        land_paths = mpl_land.find(
+            ".//svg:g[@id='PathCollection_1']", NAMESPACES
+        )
+        land_clip.extend(list(land_paths))
+        for path in land_clip:
             # Remove all other attribute items.
             path.attrib = {"d": path.attrib["d"], "stroke-linejoin": "round"}
-        land_paths.tag = "clipPath"
-        land_paths.attrib["transform"] = transform_string
-        land_clips.append(land_paths)
+        land_clips.append(land_clip)
 
-    land = ET.Element(
-        "circle",
-        attrib={
-            "cx": "50%",
-            "cy": "50%",
-            "r": f"{50 / CLIP_GLOBE_RATIO}%",
-            "fill": "url(#land_gradient)",
-            "clip-path": "url(#land_clip)",
-        },
+    gradient = SvgNamedElement(
+        id="land_gradient", tag="radialGradient", is_def=True
     )
-    gradient = ET.Element("radialGradient")
     gradient.extend(
         [
             ET.Element(
@@ -295,8 +320,107 @@ def _svg_land(logo_size_xy, logo_centre_xy, rotate=False):
             ),
         ]
     )
+    land = SvgNamedElement(
+        id="land",
+        tag="circle",
+        attrib={
+            "cx": "50%",
+            "cy": "50%",
+            "r": f"{50 / CLIP_GLOBE_RATIO}%",
+            "fill": f"url(#{gradient.id})",
+            "clip-path": f"url(#{land_clip_id})",
+        },
+    )
+    return [land, gradient], land_clips
 
-    return {"land": land, "land_gradient": gradient, "clips_list": land_clips}
+
+def _svg_logo(iris_clip, land_clip, other_elements, logo_size_xy):
+    """Assemble sub-elements into SVG for the logo."""
+    # Group contents into a logo subgroup (so text can be stored separately).
+    logo_group = ET.Element("svg", attrib={"id": "logo_group"})
+    logo_group.attrib["viewBox"] = f"0 0 {logo_size_xy[0]} {logo_size_xy[1]}"
+
+    # The elements that will just be referenced by artwork elements.
+    defs_element = ET.Element("defs")
+    defs_element.extend([iris_clip, land_clip])
+    # The elements that are displayed (not just referenced).
+    # All artwork is clipped by the Iris shape.
+    artwork_element = ET.Element(
+        "g", attrib={"clip-path": f"url(#{iris_clip.id})"}
+    )
+    for element in other_elements:
+        assert isinstance(element, SvgNamedElement)
+        if element.is_def:
+            target_parent = defs_element
+        else:
+            target_parent = artwork_element
+        target_parent.append(element)
+    for parent_element in (defs_element, artwork_element):
+        logo_group.append(parent_element)
+
+    root = ET.Element("svg")
+    for ix, dim in enumerate(("width", "height")):
+        root.attrib[dim] = str(logo_size_xy[ix])
+    root.append(logo_group)
+
+    return root
+
+
+def _svg_banner(logo_svg, size_xy, text):
+    """Make the banner SVG based on an input logo SVG."""
+    banner_height = size_xy[1]
+    text_size = banner_height * TEXT_GLOBE_RATIO
+    text_x = banner_height + 8
+    # Manual y centring since SVG dominant-baseline not widely supported.
+    text_y = banner_height - (banner_height - text_size) / 2
+    text_y *= 0.975  # Slight offset
+
+    text_element = ET.Element(
+        "text",
+        attrib={
+            "x": str(text_x),
+            "y": str(text_y),
+            "font-size": f"{text_size}pt",
+            "font-family": "georgia",
+        },
+    )
+    text_element.text = text
+
+    root = deepcopy(logo_svg)
+    for dimension, name in enumerate(("width", "height")):
+        root.attrib[name] = str(size_xy[dimension])
+
+    # Left-align the logo.
+    banner_logo_group = root.find("svg", NAMESPACES)
+    banner_logo_group.attrib["preserveAspectRatio"] = "xMinYMin meet"
+
+    root.append(text_element)
+
+    return root
+
+
+def _write_svg_file(filename, svg_root, write_dir=None, zip_archive=None):
+    """Format the svg then write the svg to a file in write_dir, or
+    optionally to an open ZipFile."""
+    input_string = ET.tostring(svg_root)
+    pretty_xml = minidom.parseString(input_string).toprettyxml()
+    # Remove extra empty lines from Matplotlib.
+    pretty_xml = "\n".join(
+        [line for line in pretty_xml.split("\n") if line.strip()]
+    )
+
+    if isinstance(zip_archive, ZipFile):
+        # Add to zip file if zip_archive provided.
+        zip_archive.writestr(filename, pretty_xml)
+        return zip_archive.filename
+    elif Path(write_dir).is_dir():
+        # Otherwise write to file normally.
+        write_path = write_dir.joinpath(filename)
+        with open(write_path, "w") as f:
+            f.write(pretty_xml)
+        return write_path
+    else:
+        raise ValueError("No valid write_dir or zip_archive provided.")
 
 
 def generate_logo(
@@ -336,168 +460,69 @@ def generate_logo(
 
     write_dir = Path(write_dir)
     # Pixel dimensions of text banner.
-    banner_size_xy = {"width": banner_width, "height": BANNER_HEIGHT}
+    banner_size_xy = [banner_width, BANNER_HEIGHT]
 
     ###########################################################################
     # Assemble SVG elements for logo.
 
-    # XML ElementTree setup.
-    namespaces = {"svg": "http://www.w3.org/2000/svg"}
-    ET.register_namespace("", namespaces["svg"])
+    # Get SVG and info for the logo's clip.
+    iris_clip, clip_size_xy_original = _svg_clip()
 
-    clip = _svg_clip()
     # Use clip proportions to dictate logo proportions and dimensions.
-    clip_size_xy_original = clip["original_size_xy"]
+    # clip_size_xy_original = clip["original_size_xy"]
     logo_proportions_xy = clip_size_xy_original / max(clip_size_xy_original)
     logo_size_xy = logo_proportions_xy * LOGO_SIZE
     logo_centre_xy = logo_size_xy / 2
 
-    # Generate the SVG objects for each 'layer'.
-    background = _svg_background()
-    glow = _svg_glow()
-    sea = _svg_sea()
-    land = _svg_land(logo_size_xy, logo_centre_xy, rotate)
+    # Get SVG objects for land, including multiple clips if rotate=True.
+    svg_land, land_clips = _svg_land(logo_size_xy, logo_centre_xy, rotate)
 
-    def dict_copy(key, source, target):
-        target[key] = source[key]
+    # Make a list of the SVG elements that don't need explicit naming in
+    # _svg_logo(). Ordering is important.
+    svg_elements = []
+    svg_elements.extend(_svg_background())
+    svg_elements.extend(_svg_glow())
+    svg_elements.extend(_svg_sea())
+    svg_elements.extend(svg_land)
 
-    # The elements that are displayed (not just referenced).
-    # Order is important for layering.
-    artwork_dict = {}
-    dict_copy("background", background, artwork_dict)
-    dict_copy("glow", glow, artwork_dict)
-    dict_copy("sea", sea, artwork_dict)
-    dict_copy("land", land, artwork_dict)
-
-    # The elements that will just be referenced by artwork elements.
-    defs_dict = {}
-    dict_copy("iris_clip", clip, defs_dict)
-    dict_copy("background_gradient", background, defs_dict)
-    dict_copy("glow_gradient", glow, defs_dict)
-    dict_copy("glow_blur", glow, defs_dict)
-    dict_copy("sea_gradient", sea, defs_dict)
-    dict_copy("land_gradient", land, defs_dict)
-    # Extract the final land clip for use as the default.
-    land_clips = land["clips_list"]
-    defs_dict["land_clip"] = land_clips[-1]
-
-    ###########################################################################
-    # Create SVG's
-
-    def svg_logo(defs_dict, artwork_dict):
-        # Group contents into a logo subgroup (so text can be stored separately).
-        logo_group = ET.Element("svg", attrib={"id": "logo_group"})
-        logo_group.attrib[
-            "viewBox"
-        ] = f"0 0 {logo_size_xy[0]} {logo_size_xy[1]}"
-
-        def populate_element_group(group, children_dict):
-            """Write each element from a dictionary, assigning an appropriate ID."""
-            for name, element in children_dict.items():
-                element.attrib["id"] = name
-                group.append(element)
-            logo_group.append(group)
-
-        defs_element = ET.Element("defs")
-        populate_element_group(defs_element, defs_dict)
-
-        # All artwork is clipped by the Iris shape.
-        artwork_element = ET.Element(
-            "g", attrib={"clip-path": "url(#iris_clip)"}
+    # Create SVG's for each rotation.
+    logo_list = []
+    banner_list = []
+    for clip in land_clips:
+        logo_list.append(
+            _svg_logo(iris_clip, clip, svg_elements, logo_size_xy)
         )
-        populate_element_group(artwork_element, artwork_dict)
-
-        root = ET.Element("svg")
-        for ix, dim in enumerate(("width", "height")):
-            root.attrib[dim] = str(logo_size_xy[ix])
-        root.append(logo_group)
-
-        return root
-
-    def svg_banner(logo_svg):
-        banner_height = banner_size_xy["height"]
-        text_size = banner_height * TEXT_GLOBE_RATIO
-        text_x = banner_height + 8
-        # Manual y centring since SVG dominant-baseline not widely supported.
-        text_y = banner_height - (banner_height - text_size) / 2
-        text_y *= 0.975  # Slight offset
-
-        text = ET.Element(
-            "text",
-            attrib={
-                "x": str(text_x),
-                "y": str(text_y),
-                "font-size": f"{text_size}pt",
-                "font-family": "georgia",
-            },
+        banner_list.append(
+            _svg_banner(logo_list[-1], banner_size_xy, banner_text)
         )
-        text.text = banner_text
-
-        root = deepcopy(logo_svg)
-        for dimension, pixels in banner_size_xy.items():
-            root.attrib[dimension] = str(pixels)
-
-        # Left-align the logo.
-        banner_logo_group = root.find("svg", namespaces)
-        banner_logo_group.attrib["preserveAspectRatio"] = "xMinYMin meet"
-
-        root.append(text)
-
-        return root
-
-    logo = svg_logo(defs_dict=defs_dict, artwork_dict=artwork_dict)
-    banner = svg_banner(logo)
 
     ###########################################################################
     # Write files.
 
     written_path_set = set()
-    def write_svg_file(svg_root, filename_suffix, zip_archive=None):
-        """Format the svg then write the svg to a file in write_dir, or
-        optionally to an open ZipFile."""
-        input_string = ET.tostring(svg_root)
-        pretty_xml = minidom.parseString(input_string).toprettyxml()
-        # Remove extra empty lines from Matplotlib.
-        pretty_xml = "\n".join(
-            [line for line in pretty_xml.split("\n") if line.strip()]
-        )
-
-        filename = f"{filename_prefix}-{filename_suffix}.svg"
-        if isinstance(zip_archive, ZipFile):
-            zip_archive.writestr(filename, pretty_xml)
-            written_path_set.add(Path(zip_archive.filename))
-        else:
-            write_path = write_dir.joinpath(filename)
-            written_path_set.add(write_path)
-            with open(write_path, "w") as f:
-                f.write(pretty_xml)
-
-    def replace_land_clip(svg_root, new_clip):
-        new_root = deepcopy(svg_root)
-        new_clip.attrib["id"] = "land_clip"
-
-        defs = new_root.find("svg/defs")
-        land_clip = defs.find(".//clipPath[@id='land_clip']")
-        defs.remove(land_clip)
-        defs.append(new_clip)
-
-        return new_root
 
     write_dict = {
-        "logo": logo,
-        "logo-title": banner,
+        "logo": logo_list,
+        "logo-title": banner_list,
     }
-    for suffix, svg in write_dict.items():
-        write_svg_file(svg, suffix)
+    for suffix, svg_list in write_dict.items():
+        # Write the main files.
+        filename = f"{filename_prefix}-{suffix}.svg"
+        written_path_set.add(
+            _write_svg_file(filename, svg_list[-1], write_dir=write_dir)
+        )
 
         # Zip archive containing components for manual creation of rotating logo.
         zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}_rotate.zip")
-        if len(land_clips) > 1:
+        if len(svg_list) > 1:
             with ZipFile(zip_path, "w") as rotate_zip:
-                for ix, clip in enumerate(land_clips):
-                    svg_rotated = replace_land_clip(svg, clip)
-                    write_svg_file(
-                        svg_rotated, f"{suffix}_rotate{ix:03d}", rotate_zip
+                for ix, svg_rotated in enumerate(svg_list):
+                    written_path_set.add(
+                        _write_svg_file(
+                            f"{suffix}_rotate{ix:03d}",
+                            svg_rotated,
+                            zip_archive=rotate_zip,
+                        )
                     )
 
                 readme_str = (
