@@ -452,7 +452,7 @@ def generate_logo(
 
     Returns
     -------
-    set of pathlib.Path
+    dict of pathlib.Path
         Paths of the created logo files.
 
     """
@@ -500,8 +500,7 @@ def generate_logo(
     ###########################################################################
     # Write files.
 
-    written_path_set = set()
-
+    written_paths = {}
     write_dict = {
         "logo": logo_list,
         "logo-title": banner_list,
@@ -509,8 +508,8 @@ def generate_logo(
     for suffix, svg_list in write_dict.items():
         # Write the main files.
         filename = f"{filename_prefix}-{suffix}.svg"
-        written_path_set.add(
-            _write_svg_file(filename, svg_list[-1], write_dir=write_dir)
+        written_paths[suffix] = _write_svg_file(
+            filename, svg_list[-1], write_dir=write_dir
         )
 
         # Zip archive containing components for manual creation of rotating logo.
@@ -518,12 +517,10 @@ def generate_logo(
         if len(svg_list) > 1:
             with ZipFile(zip_path, "w") as rotate_zip:
                 for ix, svg_rotated in enumerate(svg_list):
-                    written_path_set.add(
-                        _write_svg_file(
-                            f"{suffix}_rotate{ix:03d}",
-                            svg_rotated,
-                            zip_archive=rotate_zip,
-                        )
+                    written_paths[f"{suffix}_rotate"] = _write_svg_file(
+                        f"{suffix}_rotate{ix:03d}",
+                        svg_rotated,
+                        zip_archive=rotate_zip,
                     )
 
                 readme_str = (
@@ -536,17 +533,18 @@ def generate_logo(
 
     print("LOGO GENERATION COMPLETE")
 
-    return written_path_set
+    return written_paths
 
 
 def main():
-    description = "Command line access for the generate_logo() " \
-                  "function - docstring above. Input the parameters " \
-                  "as optional arguments (--my_arg value). The return value(" \
-                  "s) will be printed."
+    description = (
+        "Command line access for the generate_logo() "
+        "function - docstring above. Input the parameters "
+        "as optional arguments (--my_arg value). The return value("
+        "s) will be printed."
+    )
     docstring = str(generate_logo.__doc__)
-    parser = ArgumentParser(description=description,
-                            usage=docstring)
+    parser = ArgumentParser(description=description, usage=docstring)
     _, args = parser.parse_known_args()
 
     keys = args[::2]
