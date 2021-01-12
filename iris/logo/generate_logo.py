@@ -408,6 +408,15 @@ def _svg_banner(logo_svg, size_xy, text):
 def _write_svg_file(filename, svg_root, write_dir=None, zip_archive=None):
     """Format the svg then write the svg to a file in write_dir, or
     optionally to an open ZipFile."""
+    # Add a credit comment at top of SVG.
+    repo_name = "marketing"
+    script_path = Path(__file__)
+    repo_dir = [parent for parent in script_path.parents if
+                parent.name == repo_name][0]
+    script_path_relative = script_path.relative_to(repo_dir.parent)
+    comment = f"Created by https://github.com/SciTools/{script_path_relative}"
+    svg_root.insert(0, ET.Comment(comment))
+
     input_string = ET.tostring(svg_root)
     pretty_xml = minidom.parseString(input_string).toprettyxml()
     # Remove extra empty lines from Matplotlib.
