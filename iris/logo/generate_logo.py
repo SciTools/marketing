@@ -104,15 +104,17 @@ def _svg_clip():
         "11.431303 86.345703,4.89258 78.980393,1.2860119 72.51825,"
         "0.07266475 67.228516,0.08984563 Z"
     )
-    original_size_xy = np.array([133.334, 131.521])
-    scaling = LOGO_SIZE / max(original_size_xy)
+    size_xy = np.array([133.334, 131.521])
+    visual_centre_xy = np.array([66.149, 67.952])
+    scaling = LOGO_SIZE / max(size_xy)
+    offset_xy = ((size_xy / 2) - visual_centre_xy) * scaling
     clip = _SvgNamedElement(id="iris_clip", tag="clipPath", is_def=True)
     clip.append(
         ET.Element(
             "path", attrib={"d": path_string, "transform": f"scale({scaling})"}
         )
     )
-    return clip, original_size_xy
+    return clip, size_xy, offset_xy
 
 
 def _svg_background():
@@ -148,7 +150,7 @@ def _svg_background():
     return [background, gradient]
 
 
-def _svg_sea():
+def _svg_sea(offset_xy):
     """Generate the circle representing the globe's sea in the logo."""
     # Not using Cartopy for sea since it doesn't actually render curves/circles.
     gradient = _SvgNamedElement(
@@ -172,12 +174,13 @@ def _svg_sea():
             "cy": "50%",
             "r": f"{50.5 / CLIP_GLOBE_RATIO}%",
             "fill": f"url(#{gradient.id})",
+            "transform": f"translate({offset_xy[0]}, {offset_xy[1]})",
         },
     )
     return [sea, gradient]
 
 
-def _svg_glow():
+def _svg_glow(offset_xy):
     """Generate the coloured glow to go behind the globe in the logo."""
     gradient = _SvgNamedElement(
         id="glow_gradient",
@@ -224,12 +227,13 @@ def _svg_glow():
             "stroke": "#ffffff",
             "stroke-width": "2",
             "stroke-opacity": "0.797414",
+            "transform": f"translate({offset_xy[0]}, {offset_xy[1]})",
         },
     )
     return [glow, gradient, blur]
 
 
-def _svg_land(logo_size_xy, logo_centre_xy, rotate=False):
+def _svg_land(logo_size_xy, logo_centre_xy, offset_xy, rotate=False):
     """
     Generate the circle representing the globe's land in the logo, clipped by
     appropriate coastline shapes (using Matplotlib and Cartopy).
@@ -330,6 +334,7 @@ def _svg_land(logo_size_xy, logo_centre_xy, rotate=False):
             "r": f"{50 / CLIP_GLOBE_RATIO}%",
             "fill": f"url(#{gradient.id})",
             "clip-path": f"url(#{land_clip_id})",
+            "transform": f"translate({offset_xy[0]}, {offset_xy[1]})",
         },
     )
     return [land, gradient], land_clips
@@ -467,23 +472,27 @@ def generate_logo(
     # Assemble SVG elements for logo.
 
     # Get SVG and info for the logo's clip.
-    iris_clip, clip_size_xy_original = _svg_clip()
+    iris_clip, clip_size_xy_original, clip_offset_xy = _svg_clip()
 
     # Use clip proportions to dictate logo proportions and dimensions.
-    # clip_size_xy_original = clip["original_size_xy"]
     logo_proportions_xy = clip_size_xy_original / max(clip_size_xy_original)
     logo_size_xy = logo_proportions_xy * LOGO_SIZE
     logo_centre_xy = logo_size_xy / 2
 
+    # Image should be moved to centre globe on the clip's visual centre.
+    image_offset_xy = clip_offset_xy * -1
+
     # Get SVG objects for land, including multiple clips if rotate=True.
-    svg_land, land_clips = _svg_land(logo_size_xy, logo_centre_xy, rotate)
+    svg_land, land_clips = _svg_land(
+        logo_size_xy, logo_centre_xy, image_offset_xy, rotate
+    )
 
     # Make a list of the SVG elements that don't need explicit naming in
     # _svg_logo(). Ordering is important.
     svg_elements = []
     svg_elements.extend(_svg_background())
-    svg_elements.extend(_svg_glow())
-    svg_elements.extend(_svg_sea())
+    svg_elements.extend(_svg_glow(image_offset_xy))
+    svg_elements.extend(_svg_sea(image_offset_xy))
     svg_elements.extend(svg_land)
 
     # Create SVG's for each rotation.
