@@ -106,15 +106,19 @@ def _svg_clip():
     )
     size_xy = np.array([133.334, 131.521])
     visual_centre_xy = np.array([66.149, 67.952])
+
     scaling = LOGO_SIZE / max(size_xy)
-    offset_xy = (visual_centre_xy - (size_xy / 2)) * scaling
+    size_offset_xy = (size_xy - max(size_xy)) / 2
+    centre_offset_xy = visual_centre_xy - (size_xy / 2)
+    offset_xy = (size_offset_xy + centre_offset_xy) * scaling
+
     clip = _SvgNamedElement(id="iris_clip", tag="clipPath", is_def=True)
     clip.append(
         ET.Element(
             "path", attrib={"d": path_string, "transform": f"scale({scaling})"}
         )
     )
-    return clip, size_xy, offset_xy
+    return clip, offset_xy
 
 
 def _svg_background():
@@ -150,7 +154,7 @@ def _svg_background():
     return [background, gradient]
 
 
-def _svg_sea(offset_xy):
+def _svg_sea():
     """Generate the circle representing the globe's sea in the logo."""
     # Not using Cartopy for sea since it doesn't actually render curves/circles.
     gradient = _SvgNamedElement(
@@ -174,13 +178,12 @@ def _svg_sea(offset_xy):
             "cy": "50%",
             "r": f"{50.5 / CLIP_GLOBE_RATIO}%",
             "fill": f"url(#{gradient.id})",
-            "transform": f"translate({offset_xy[0]} {offset_xy[1]})",
         },
     )
     return [sea, gradient]
 
 
-def _svg_glow(offset_xy):
+def _svg_glow():
     """Generate the coloured glow to go behind the globe in the logo."""
     # Construct the gradient matrix transform.
     gradient_scale_xy = np.array([1.15, 1.35])
@@ -235,20 +238,19 @@ def _svg_glow(offset_xy):
             "stroke": "#ffffff",
             "stroke-width": "2",
             "stroke-opacity": "0.797414",
-            "transform": f"translate({offset_xy[0]} {offset_xy[1]})",
         },
     )
     return [glow, gradient, blur]
 
 
-def _svg_land(logo_size_xy, offset_xy, rotate=False):
+def _svg_land(rotate=False):
     """
     Generate the circle representing the globe's land in the logo, clipped by
     appropriate coastline shapes (using Matplotlib and Cartopy).
     """
     # Set plotting size/proportions.
     mpl_points_per_inch = 72
-    plot_inches = logo_size_xy / mpl_points_per_inch
+    plot_inches = LOGO_SIZE / mpl_points_per_inch
     plot_padding = (1 - (1 / CLIP_GLOBE_RATIO)) / 2
 
     # Create land with simplified coastlines.
@@ -275,12 +277,6 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
     # Normalise to -180..+180
     rotation_longitudes = (rotation_longitudes + 360.0 + 180.0) % 360.0 - 180.0
 
-    logo_centre_xy = logo_size_xy / 2
-    tilt_string = (
-        f"rotate({perspective_tilt} {logo_centre_xy[0]} "
-        f"{logo_centre_xy[1]})"
-    )
-
     land_clip_id = "land_clip"
     for lon in rotation_longitudes:
         # Use Matplotlib and Cartopy to generate land-shaped SVG clips for each longitude.
@@ -289,7 +285,7 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
         )
 
         # Use constants set earlier to achieve desired dimensions.
-        plt.figure(0, figsize=plot_inches)
+        plt.figure(0, figsize=[plot_inches] * 2)
         ax = plt.subplot(projection=projection_rotated)
         plt.subplots_adjust(
             left=plot_padding,
@@ -331,6 +327,7 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
             ),
         ]
     )
+    logo_centre = LOGO_SIZE / 2
     land = _SvgNamedElement(
         id="land",
         tag="circle",
@@ -340,28 +337,27 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
             "r": f"{50 / CLIP_GLOBE_RATIO}%",
             "fill": f"url(#{gradient.id})",
             "clip-path": f"url(#{land_clip_id})",
-            "transform": f"translate({offset_xy[0]} {offset_xy[1]})"
-            + tilt_string,
+            "transform": f"rotate({perspective_tilt} {logo_centre} {logo_centre})",
         },
     )
     return [land, gradient], land_clips
 
 
-def _svg_logo(iris_clip, land_clip, other_elements, logo_size_xy, offset_xy):
+def _svg_logo(iris_clip, land_clip, other_elements, offset_xy):
     """Assemble sub-elements into SVG for the logo."""
     # Group contents into a logo subgroup (so text can be stored separately).
     logo_group = ET.Element("svg", attrib={"id": "logo_group"})
-    logo_group.attrib["viewBox"] = f"0 0 {logo_size_xy[0]} {logo_size_xy[1]}"
+    logo_group.attrib["viewBox"] = f"0 0 {LOGO_SIZE} {LOGO_SIZE}"
 
     # Use matrix transformation to shrink and translate, aligning the offset
     # centre with the image dimensional centre.
-    offset_scaling_xy = (logo_size_xy - abs(offset_xy * 3)) / logo_size_xy
+    offset_scaling_xy = (LOGO_SIZE - abs(offset_xy * 3)) / LOGO_SIZE
     offset_scaling = min(offset_scaling_xy)
-    logo_centre_xy = logo_size_xy / 2
+    logo_centre = LOGO_SIZE / 2
     # Recentre after scaling.
-    matrix_offset_xy = logo_centre_xy - (offset_scaling * logo_centre_xy)
+    matrix_offset = logo_centre - (offset_scaling * logo_centre)
     # Apply offset (possible now the contents are sufficiently smaller than the image).
-    matrix_offset_xy -= offset_scaling * offset_xy
+    matrix_offset_xy = matrix_offset - (offset_scaling * offset_xy)
     matrix_string = f"matrix({offset_scaling} 0 0 {offset_scaling} {matrix_offset_xy[0]} {matrix_offset_xy[1]})"
 
     # The elements that will just be referenced by artwork elements.
@@ -387,8 +383,8 @@ def _svg_logo(iris_clip, land_clip, other_elements, logo_size_xy, offset_xy):
         logo_group.append(parent_element)
 
     root = ET.Element("svg")
-    for ix, dim in enumerate(("width", "height")):
-        root.attrib[dim] = str(logo_size_xy[ix])
+    for dim in ("width", "height"):
+        root.attrib[dim] = str(LOGO_SIZE)
     root.append(logo_group)
 
     return root
@@ -504,23 +500,18 @@ def generate_logo(
     # Assemble SVG elements for logo.
 
     # Get SVG and info for the logo's clip.
-    # clip_offset_xy: image should be moved to centre globe on the clip's visual centre.
-    iris_clip, clip_size_xy_original, clip_offset_xy = _svg_clip()
-
-    # Use clip proportions to dictate logo proportions and dimensions.
-    logo_proportions_xy = clip_size_xy_original / max(clip_size_xy_original)
-    logo_size_xy = logo_proportions_xy * LOGO_SIZE
-    logo_centre_xy = logo_size_xy / 2
+    # clip_offset_xy: used to align clip visual centre with image dimensional centre.
+    iris_clip, clip_offset_xy = _svg_clip()
 
     # Get SVG objects for land, including multiple clips if rotate=True.
-    svg_land, land_clips = _svg_land(logo_size_xy, clip_offset_xy, rotate)
+    svg_land, land_clips = _svg_land(rotate)
 
     # Make a list of the SVG elements that don't need explicit naming in
     # _svg_logo(). Ordering is important.
     svg_elements = []
     svg_elements.extend(_svg_background())
-    svg_elements.extend(_svg_glow(clip_offset_xy))
-    svg_elements.extend(_svg_sea(clip_offset_xy))
+    svg_elements.extend(_svg_glow())
+    svg_elements.extend(_svg_sea())
     svg_elements.extend(svg_land)
 
     # Create SVG's for each rotation.
@@ -528,9 +519,7 @@ def generate_logo(
     banner_list = []
     for clip in land_clips:
         logo_list.append(
-            _svg_logo(
-                iris_clip, clip, svg_elements, logo_size_xy, clip_offset_xy
-            )
+            _svg_logo(iris_clip, clip, svg_elements, clip_offset_xy)
         )
         banner_list.append(
             _svg_banner(logo_list[-1], banner_size_xy, banner_text)
