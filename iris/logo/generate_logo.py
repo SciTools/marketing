@@ -185,7 +185,9 @@ def _svg_glow(offset_xy):
     # Construct the gradient matrix transform.
     gradient_scale_xy = np.array([1.15, 1.35])
     gradient_centre = 0.5
-    gradient_offset_xy = gradient_centre - (gradient_scale_xy * gradient_centre)
+    gradient_offset_xy = gradient_centre - (
+        gradient_scale_xy * gradient_centre
+    )
     # Move gradient upwards on y-axis.
     gradient_offset_xy[1] -= 0.5 * gradient_centre
     matrix_string = f"matrix({gradient_scale_xy[0]} 0 0 {gradient_scale_xy[1]} {gradient_offset_xy[0]} {gradient_offset_xy[1]})"
@@ -304,9 +306,7 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
 
         # Find land paths and convert to clip paths.
         land_clip = _SvgNamedElement(
-            id=land_clip_id,
-            tag="clipPath",
-            is_def=True,
+            id=land_clip_id, tag="clipPath", is_def=True,
         )
         mpl_land = svg_mpl.find(".//svg:g[@id='figure_1']", NAMESPACES)
         land_paths = mpl_land.find(
@@ -340,7 +340,8 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
             "r": f"{50 / CLIP_GLOBE_RATIO}%",
             "fill": f"url(#{gradient.id})",
             "clip-path": f"url(#{land_clip_id})",
-            "transform": f"translate({offset_xy[0]} {offset_xy[1]})" + tilt_string,
+            "transform": f"translate({offset_xy[0]} {offset_xy[1]})"
+            + tilt_string,
         },
     )
     return [land, gradient], land_clips
