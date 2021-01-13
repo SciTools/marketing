@@ -182,11 +182,19 @@ def _svg_sea(offset_xy):
 
 def _svg_glow(offset_xy):
     """Generate the coloured glow to go behind the globe in the logo."""
+    # Construct the gradient matrix transform.
+    gradient_scale_xy = np.array([1.15, 1.35])
+    gradient_centre = 0.5
+    gradient_offset_xy = gradient_centre - (gradient_scale_xy * gradient_centre)
+    # Move gradient upwards on y-axis.
+    gradient_offset_xy[1] -= 0.5 * gradient_centre
+    matrix_string = f"matrix({gradient_scale_xy[0]} 0 0 {gradient_scale_xy[1]} {gradient_offset_xy[0]} {gradient_offset_xy[1]})"
+
     gradient = _SvgNamedElement(
         id="glow_gradient",
         tag="radialGradient",
         is_def=True,
-        attrib={"gradientTransform": "scale(1.15 1.35), translate(-0.1 -0.3)"},
+        attrib={"gradientTransform": matrix_string},
     )
     gradient.extend(
         [
