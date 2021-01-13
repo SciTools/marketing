@@ -274,7 +274,7 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
     rotation_longitudes = (rotation_longitudes + 360.0 + 180.0) % 360.0 - 180.0
 
     logo_centre_xy = logo_size_xy / 2
-    transform_string = (
+    tilt_string = (
         f"rotate({perspective_tilt} {logo_centre_xy[0]} "
         f"{logo_centre_xy[1]})"
     )
@@ -307,7 +307,6 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
             id=land_clip_id,
             tag="clipPath",
             is_def=True,
-            attrib={"transform": transform_string},
         )
         mpl_land = svg_mpl.find(".//svg:g[@id='figure_1']", NAMESPACES)
         land_paths = mpl_land.find(
@@ -341,7 +340,7 @@ def _svg_land(logo_size_xy, offset_xy, rotate=False):
             "r": f"{50 / CLIP_GLOBE_RATIO}%",
             "fill": f"url(#{gradient.id})",
             "clip-path": f"url(#{land_clip_id})",
-            "transform": f"translate({offset_xy[0]} {offset_xy[1]})",
+            "transform": f"translate({offset_xy[0]} {offset_xy[1]})" + tilt_string,
         },
     )
     return [land, gradient], land_clips
