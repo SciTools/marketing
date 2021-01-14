@@ -51,6 +51,26 @@ class _SvgNamedElement(ET.Element):
         self.is_def = is_def
 
 
+def _matrix_transform_string(scaling_xy, centre_xy, translation_xy):
+    """
+    Common script for generating SVG matrix transformation string. Note this
+    doesn't [currently] allow for skew arguments. Inputs should be numpy
+    arrays.
+    """
+    recentre_xy = centre_xy - (scaling_xy * centre_xy)
+    translation_xy += recentre_xy
+    matrix_sequence = [
+        scaling_xy[0],
+        0,
+        0,
+        scaling_xy[1],
+        translation_xy[0],
+        translation_xy[1],
+    ]
+    matrix_string = " ".join([str(i) for i in matrix_sequence])
+    return f"matrix({matrix_string})"
+
+
 def _svg_clip():
     """Generate the clip for masking the entire logo contents."""
     # SVG string representing bezier curves, drawn in a GUI then size-converted
@@ -185,16 +205,12 @@ def _svg_sea():
 
 def _svg_glow():
     """Generate the coloured glow to go behind the globe in the logo."""
-    # Construct the gradient matrix transform.
     gradient_scale_xy = np.array([1.15, 1.35])
-    gradient_centre = 0.5
-    gradient_offset_xy = gradient_centre - (
-        gradient_scale_xy * gradient_centre
+    gradient_centre_xy = np.array([0.5, 0.5])
+    gradient_translation_xy = np.array([0, -0.25])
+    matrix_string = _matrix_transform_string(
+        gradient_scale_xy, gradient_centre_xy, gradient_translation_xy
     )
-    # Move gradient upwards on y-axis.
-    gradient_offset_xy[1] -= 0.5 * gradient_centre
-    matrix_string = f"matrix({gradient_scale_xy[0]} 0 0 {gradient_scale_xy[1]} {gradient_offset_xy[0]} {gradient_offset_xy[1]})"
-
     gradient = _SvgNamedElement(
         id="glow_gradient",
         tag="radialGradient",
@@ -349,28 +365,13 @@ def _svg_logo(iris_clip, land_clip, other_elements, offset_xy):
     logo_group = ET.Element("svg", attrib={"id": "logo_group"})
     logo_group.attrib["viewBox"] = f"0 0 {LOGO_SIZE} {LOGO_SIZE}"
 
-    # Use matrix transformation to shrink and translate, aligning the offset
-    # centre with the image dimensional centre.
-    offset_scaling_xy = (LOGO_SIZE - abs(offset_xy * 3)) / LOGO_SIZE
-    offset_scaling = min(offset_scaling_xy)
-    logo_centre = LOGO_SIZE / 2
-    # Recentre after scaling.
-    matrix_offset = logo_centre - (offset_scaling * logo_centre)
-    # Apply offset (possible now the contents are sufficiently smaller than the image).
-    matrix_offset_xy = matrix_offset - (offset_scaling * offset_xy)
-    matrix_string = f"matrix({offset_scaling} 0 0 {offset_scaling} {matrix_offset_xy[0]} {matrix_offset_xy[1]})"
-
     # The elements that will just be referenced by artwork elements.
     defs_element = ET.Element("defs")
     defs_element.extend([iris_clip, land_clip])
     # The elements that are displayed (not just referenced).
     # All artwork is clipped by the Iris shape.
     artwork_element = ET.Element(
-        "g",
-        attrib={
-            "clip-path": f"url(#{iris_clip.id})",
-            "transform": matrix_string,
-        },
+        "g", attrib={"clip-path": f"url(#{iris_clip.id})"},
     )
     for element in other_elements:
         assert isinstance(element, _SvgNamedElement)
@@ -381,6 +382,16 @@ def _svg_logo(iris_clip, land_clip, other_elements, offset_xy):
         target_parent.append(element)
     for parent_element in (defs_element, artwork_element):
         logo_group.append(parent_element)
+
+    # Shrink and translate contents - aligning the offset centre with the image dimensional centre.
+    offset_scaling_xy = (LOGO_SIZE - abs(offset_xy * 3)) / LOGO_SIZE
+    # Lock aspect ratio.
+    offset_scaling_xy = np.repeat(min(offset_scaling_xy), 2)
+    logo_centre_xy = np.repeat(LOGO_SIZE / 2, 2)
+    matrix_string = _matrix_transform_string(
+        offset_scaling_xy, logo_centre_xy, offset_xy * -1
+    )
+    artwork_element.attrib["transform"] = matrix_string
 
     root = ET.Element("svg")
     for dim in ("width", "height"):
