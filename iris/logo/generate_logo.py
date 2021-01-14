@@ -293,7 +293,6 @@ def _svg_land(rotate=False):
     # Normalise to -180..+180
     rotation_longitudes = (rotation_longitudes + 360.0 + 180.0) % 360.0 - 180.0
 
-    land_clip_id = "land_clip"
     for lon in rotation_longitudes:
         # Use Matplotlib and Cartopy to generate land-shaped SVG clips for each longitude.
         projection_rotated = ccrs.Orthographic(
@@ -318,7 +317,7 @@ def _svg_land(rotate=False):
 
         # Find land paths and convert to clip paths.
         land_clip = _SvgNamedElement(
-            id=land_clip_id, tag="clipPath", is_def=True,
+            id=f"land_clip_{lon}", tag="clipPath", is_def=True,
         )
         mpl_land = svg_mpl.find(".//svg:g[@id='figure_1']", NAMESPACES)
         land_paths = mpl_land.find(
@@ -329,6 +328,7 @@ def _svg_land(rotate=False):
             # Remove all other attribute items.
             path.attrib = {"d": path.attrib["d"], "stroke-linejoin": "round"}
         land_clips.append(land_clip)
+    plt.close()
 
     gradient = _SvgNamedElement(
         id="land_gradient", tag="radialGradient", is_def=True
@@ -352,22 +352,42 @@ def _svg_land(rotate=False):
             "cy": "50%",
             "r": f"{50 / CLIP_GLOBE_RATIO}%",
             "fill": f"url(#{gradient.id})",
-            "clip-path": f"url(#{land_clip_id})",
+            "clip-path": f"url(#{land_clips[0].id})",
             "transform": f"rotate({perspective_tilt} {logo_centre} {logo_centre})",
         },
     )
+    if rotate:
+        animation_values = ";".join(
+            [f"url(#{clip.id})" for clip in land_clips]
+        )
+        frames = len(land_clips)
+        duration = frames / 30
+        land.append(
+            ET.Element(
+                "animate",
+                attrib={
+                    "attributeName": "clip-path",
+                    "values": animation_values,
+                    "begin": "0s",
+                    "repeatCount": "indefinite",
+                    "dur": f"{duration}s",
+                },
+            )
+        )
     return [land, gradient], land_clips
 
 
-def _svg_logo(iris_clip, land_clip, other_elements, offset_xy):
-    """Assemble sub-elements into SVG for the logo."""
+def _svg_logos(
+    iris_clip, other_elements, offset_xy, banner_size_xy, banner_text,
+):
+    """Assemble sub-elements into SVG's for the logo and banner."""
     # Group contents into a logo subgroup (so text can be stored separately).
     logo_group = ET.Element("svg", attrib={"id": "logo_group"})
     logo_group.attrib["viewBox"] = f"0 0 {LOGO_SIZE} {LOGO_SIZE}"
 
     # The elements that will just be referenced by artwork elements.
     defs_element = ET.Element("defs")
-    defs_element.extend([iris_clip, land_clip])
+    defs_element.append(iris_clip)
     # The elements that are displayed (not just referenced).
     # All artwork is clipped by the Iris shape.
     artwork_element = ET.Element(
@@ -393,17 +413,14 @@ def _svg_logo(iris_clip, land_clip, other_elements, offset_xy):
     )
     artwork_element.attrib["transform"] = matrix_string
 
-    root = ET.Element("svg")
-    for dim in ("width", "height"):
-        root.attrib[dim] = str(LOGO_SIZE)
-    root.append(logo_group)
+    logo_root = ET.Element("svg")
+    for dimension in ("width", "height"):
+        logo_root.attrib[dimension] = str(LOGO_SIZE)
+    logo_root.append(logo_group)
 
-    return root
-
-
-def _svg_banner(logo_svg, size_xy, text):
-    """Make the banner SVG based on an input logo SVG."""
-    banner_height = size_xy[1]
+    ###########################################################################
+    # Make the banner SVG, incorporating the logo SVG.
+    banner_height = banner_size_xy[1]
     text_size = banner_height * TEXT_GLOBE_RATIO
     text_x = banner_height + 8
     # Manual y centring since SVG dominant-baseline not widely supported.
@@ -419,19 +436,19 @@ def _svg_banner(logo_svg, size_xy, text):
             "font-family": "georgia",
         },
     )
-    text_element.text = text
+    text_element.text = banner_text
 
-    root = deepcopy(logo_svg)
+    banner_root = deepcopy(logo_root)
     for dimension, name in enumerate(("width", "height")):
-        root.attrib[name] = str(size_xy[dimension])
+        banner_root.attrib[name] = str(banner_size_xy[dimension])
 
     # Left-align the logo.
-    banner_logo_group = root.find("svg", NAMESPACES)
+    banner_logo_group = banner_root.find("svg", NAMESPACES)
     banner_logo_group.attrib["preserveAspectRatio"] = "xMinYMin meet"
 
-    root.append(text_element)
+    banner_root.append(text_element)
 
-    return root
+    return logo_root, banner_root
 
 
 def _write_svg_file(filename, svg_root, write_dir=None, zip_archive=None):
@@ -485,8 +502,9 @@ def generate_logo(
         Pixel width of the banner logo - must be manually adjusted to fit
         `banner_text`.
     rotate : bool
-        Whether to also generate ZIP file of rotated-longitude logos.
-        NOTE: takes approx 1min to generate this.
+        Whether to also generate rotating earth logos.
+        NOTE: takes approx 1min to generate this. Animated SVG files are known
+              to cause high web-browser CPU demand.
 
     Returns
     -------
@@ -508,51 +526,75 @@ def generate_logo(
     # clip_offset_xy: used to align clip visual centre with image dimensional centre.
     iris_clip, clip_offset_xy = _svg_clip()
 
-    # Get SVG objects for land, including multiple clips if rotate=True.
-    svg_land, land_clips = _svg_land(rotate)
-
     # Make a list of the SVG elements that don't need explicit naming in
     # _svg_logo(). Ordering is important.
     svg_elements = []
     svg_elements.extend(_svg_background())
     svg_elements.extend(_svg_glow())
     svg_elements.extend(_svg_sea())
-    svg_elements.extend(svg_land)
 
-    # Create SVG's for each rotation.
-    logo_list = []
-    banner_list = []
-    for clip in land_clips:
-        logo_list.append(
-            _svg_logo(iris_clip, clip, svg_elements, clip_offset_xy)
-        )
-        banner_list.append(
-            _svg_banner(logo_list[-1], banner_size_xy, banner_text)
-        )
+    logo_kwargs = {
+        "iris_clip": iris_clip,
+        "offset_xy": clip_offset_xy,
+        "banner_size_xy": banner_size_xy,
+        "banner_text": banner_text,
+    }
+
+    logo_names = ("logo", "logo-title")
+    written_paths = {}
+
+    # Create the main logos.
+    # Specialised SVG objects for the land and the coastlines clip.
+    svg_land, land_clip = _svg_land()
+    logos_static = _svg_logos(
+        other_elements=svg_elements + svg_land + land_clip, **logo_kwargs
+    )
+    for logo_type_ix, suffix in enumerate(logo_names):
+        filename = f"{filename_prefix}-{suffix}.svg"
+        logo_write = logos_static[logo_type_ix]
+        logo_path = _write_svg_file(filename, logo_write, write_dir=write_dir)
+        written_paths[suffix] = logo_path
 
     ###########################################################################
-    # Write files.
+    if rotate:
+        logo_names_rotate = [suffix + "_rotate" for suffix in logo_names]
+        svg_land_rotating, land_clip_rotations = _svg_land(rotate=True)
 
-    written_paths = {}
-    write_dict = {
-        "logo": logo_list,
-        "logo-title": banner_list,
-    }
-    for suffix, svg_list in write_dict.items():
-        # Write the main files.
-        filename = f"{filename_prefix}-{suffix}.svg"
-        written_paths[suffix] = _write_svg_file(
-            filename, svg_list[-1], write_dir=write_dir
+        # Logos animated to rotate.
+        logos_rotating = _svg_logos(
+            other_elements=svg_elements
+            + svg_land_rotating
+            + land_clip_rotations,
+            **logo_kwargs,
         )
+        for logo_type_ix, suffix in enumerate(logo_names_rotate):
+            filename = f"{filename_prefix}-{suffix}.svg"
+            logo_write = logos_rotating[logo_type_ix]
+            logo_path = _write_svg_file(
+                filename, logo_write, write_dir=write_dir
+            )
+            written_paths[f"{suffix}_svg"] = logo_path
 
-        # Zip archive containing components for manual creation of rotating logo.
-        zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}_rotate.zip")
-        if len(svg_list) > 1:
+        # A series of fixed logos for each rotation longitude.
+        fixed_clip_name = "land_clip"
+        svg_land[0].attrib["clip-path"] = f"url(#{fixed_clip_name})"
+        for clip in land_clip_rotations:
+            clip.attrib["id"] = fixed_clip_name
+        logos_rotated = [
+            _svg_logos(
+                other_elements=svg_elements + svg_land + [clip], **logo_kwargs
+            )
+            for clip in land_clip_rotations
+        ]
+        for logo_type_ix, suffix in enumerate(logo_names_rotate):
+            # Insert fixed rotation logos into a ZIP file.
+            zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.zip")
             with ZipFile(zip_path, "w") as rotate_zip:
-                for ix, svg_rotated in enumerate(svg_list):
-                    written_paths[f"{suffix}_rotate"] = _write_svg_file(
-                        f"{suffix}_rotate{ix:03d}",
-                        svg_rotated,
+                for ix, logo in enumerate(logos_rotated):
+                    logo_write = logo[logo_type_ix]
+                    _write_svg_file(
+                        f"{suffix}{ix:03d}",
+                        logo_write,
                         zip_archive=rotate_zip,
                     )
 
@@ -563,6 +605,8 @@ def generate_logo(
                     "-optimized-gif-in-gimp/"
                 )
                 rotate_zip.writestr("_README.txt", readme_str)
+
+            written_paths[f"{suffix}_zip"] = zip_path
 
     print("LOGO GENERATION COMPLETE")
 
