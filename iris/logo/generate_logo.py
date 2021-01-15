@@ -519,9 +519,6 @@ def generate_logo(
     # Pixel dimensions of text banner.
     banner_size_xy = [banner_width, BANNER_HEIGHT]
 
-    ###########################################################################
-    # Assemble SVG elements for logo.
-
     # Get SVG and info for the logo's clip.
     # clip_offset_xy: used to align clip visual centre with image dimensional centre.
     iris_clip, clip_offset_xy = _svg_clip()
@@ -607,6 +604,8 @@ def generate_logo(
                 rotate_zip.writestr("_README.txt", readme_str)
 
             written_paths[f"{suffix}_zip"] = zip_path
+
+    ###########################################################################
 
     print("LOGO GENERATION COMPLETE")
 
