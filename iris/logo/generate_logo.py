@@ -400,8 +400,7 @@ def _svg_logos(
         else:
             target_parent = artwork_element
         target_parent.append(element)
-    for parent_element in (defs_element, artwork_element):
-        logo_group.append(parent_element)
+    logo_group.extend((defs_element, artwork_element))
 
     # Shrink and translate contents - aligning the offset centre with the image dimensional centre.
     offset_scaling_xy = (LOGO_SIZE - abs(offset_xy * 3)) / LOGO_SIZE
@@ -414,8 +413,7 @@ def _svg_logos(
     artwork_element.attrib["transform"] = matrix_string
 
     logo_root = ET.Element("svg")
-    for dimension in ("width", "height"):
-        logo_root.attrib[dimension] = str(LOGO_SIZE)
+    logo_root.attrib.update(dict.fromkeys(("width", "height"), str(LOGO_SIZE)))
     logo_root.append(logo_group)
 
     ###########################################################################
