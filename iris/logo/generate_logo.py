@@ -134,9 +134,7 @@ def _svg_clip():
 
     clip = _SvgNamedElement(id="iris_clip", tag="clipPath", is_def=True)
     clip.append(
-        ET.Element(
-            "path", attrib={"d": path_string, "transform": f"scale({scaling})"}
-        )
+        ET.Element("path", attrib={"d": path_string, "transform": f"scale({scaling})"})
     )
     return clip, offset_xy
 
@@ -151,25 +149,15 @@ def _svg_background():
     )
     gradient.extend(
         [
-            ET.Element(
-                "stop", attrib={"offset": "0", "stop-color": "#13385d",},
-            ),
-            ET.Element(
-                "stop", attrib={"offset": "0.43", "stop-color": "#0b3849",},
-            ),
-            ET.Element(
-                "stop", attrib={"offset": "1", "stop-color": "#272b2c",},
-            ),
+            ET.Element("stop", attrib={"offset": "0", "stop-color": "#13385d",},),
+            ET.Element("stop", attrib={"offset": "0.43", "stop-color": "#0b3849",},),
+            ET.Element("stop", attrib={"offset": "1", "stop-color": "#272b2c",},),
         ]
     )
     background = _SvgNamedElement(
         id="background",
         tag="rect",
-        attrib={
-            "height": "100%",
-            "width": "100%",
-            "fill": f"url(#{gradient.id})",
-        },
+        attrib={"height": "100%", "width": "100%", "fill": f"url(#{gradient.id})",},
     )
     return [background, gradient]
 
@@ -177,17 +165,11 @@ def _svg_background():
 def _svg_sea():
     """Generate the circle representing the globe's sea in the logo."""
     # Not using Cartopy for sea since it doesn't actually render curves/circles.
-    gradient = _SvgNamedElement(
-        id="sea_gradient", tag="radialGradient", is_def=True
-    )
+    gradient = _SvgNamedElement(id="sea_gradient", tag="radialGradient", is_def=True)
     gradient.extend(
         [
-            ET.Element(
-                "stop", attrib={"offset": "0", "stop-color": "#20b0ea"},
-            ),
-            ET.Element(
-                "stop", attrib={"offset": "1", "stop-color": "#156475",},
-            ),
+            ET.Element("stop", attrib={"offset": "0", "stop-color": "#20b0ea"},),
+            ET.Element("stop", attrib={"offset": "1", "stop-color": "#156475",},),
         ]
     )
     sea = _SvgNamedElement(
@@ -235,9 +217,7 @@ def _svg_glow():
                     "stop-opacity": "0.74117649",
                 },
             ),
-            ET.Element(
-                "stop", attrib={"offset": "1", "stop-color": "#b6df34",},
-            ),
+            ET.Element("stop", attrib={"offset": "1", "stop-color": "#b6df34",},),
         ]
     )
     blur = _SvgNamedElement(id="glow_blur", tag="filter", is_def=True)
@@ -270,9 +250,7 @@ def _svg_land(rotate=False):
     plot_padding = (1 - (1 / CLIP_GLOBE_RATIO)) / 2
 
     # Create land with simplified coastlines.
-    simple_geometries = [
-        geometry.simplify(0.8, True) for geometry in LAND.geometries()
-    ]
+    simple_geometries = [geometry.simplify(0.8, True) for geometry in LAND.geometries()]
     LAND.geometries = lambda: iter(simple_geometries)
 
     # Variable that will store the sequence of land-shaped SVG clips for
@@ -320,9 +298,7 @@ def _svg_land(rotate=False):
             id=f"land_clip_{lon}", tag="clipPath", is_def=True,
         )
         mpl_land = svg_mpl.find(".//svg:g[@id='figure_1']", NAMESPACES)
-        land_paths = mpl_land.find(
-            ".//svg:g[@id='PathCollection_1']", NAMESPACES
-        )
+        land_paths = mpl_land.find(".//svg:g[@id='PathCollection_1']", NAMESPACES)
         land_clip.extend(list(land_paths))
         for path in land_clip:
             # Remove all other attribute items.
@@ -330,17 +306,11 @@ def _svg_land(rotate=False):
         land_clips.append(land_clip)
     plt.close()
 
-    gradient = _SvgNamedElement(
-        id="land_gradient", tag="radialGradient", is_def=True
-    )
+    gradient = _SvgNamedElement(id="land_gradient", tag="radialGradient", is_def=True)
     gradient.extend(
         [
-            ET.Element(
-                "stop", attrib={"offset": "0", "stop-color": "#d5e488"}
-            ),
-            ET.Element(
-                "stop", attrib={"offset": "1", "stop-color": "#aec928"}
-            ),
+            ET.Element("stop", attrib={"offset": "0", "stop-color": "#d5e488"}),
+            ET.Element("stop", attrib={"offset": "1", "stop-color": "#aec928"}),
         ]
     )
     logo_centre = LOGO_SIZE / 2
@@ -357,9 +327,7 @@ def _svg_land(rotate=False):
         },
     )
     if rotate:
-        animation_values = ";".join(
-            [f"url(#{clip.id})" for clip in land_clips]
-        )
+        animation_values = ";".join([f"url(#{clip.id})" for clip in land_clips])
         frames = len(land_clips)
         duration = frames / 30
         land.append(
@@ -381,17 +349,18 @@ def _svg_logos(
     iris_clip, other_elements, offset_xy, banner_size_xy, banner_text,
 ):
     """Assemble sub-elements into SVG's for the logo and banner."""
-    # Group contents into a logo subgroup (so text can be stored separately).
-    logo_group = ET.Element("svg", attrib={"id": "logo_group"})
-    logo_group.attrib["viewBox"] = f"0 0 {LOGO_SIZE} {LOGO_SIZE}"
+    # Make the logo SVG first.
+    logo_root = _SvgNamedElement(
+        "logo", "svg", attrib={"viewBox": f"0 0 {LOGO_SIZE} {LOGO_SIZE}"}
+    )
 
     # The elements that will just be referenced by artwork elements.
-    defs_element = ET.Element("defs")
+    defs_element = _SvgNamedElement("defs", "defs")
     defs_element.append(iris_clip)
     # The elements that are displayed (not just referenced).
     # All artwork is clipped by the Iris shape.
-    artwork_element = ET.Element(
-        "g", attrib={"clip-path": f"url(#{iris_clip.id})"},
+    artwork_element = _SvgNamedElement(
+        "artwork", "g", attrib={"clip-path": f"url(#{iris_clip.id})"}
     )
     for element in other_elements:
         assert isinstance(element, _SvgNamedElement)
@@ -400,9 +369,10 @@ def _svg_logos(
         else:
             target_parent = artwork_element
         target_parent.append(element)
-    logo_group.extend((defs_element, artwork_element))
+    logo_root.extend((defs_element, artwork_element))
 
-    # Shrink and translate contents - aligning the offset centre with the image dimensional centre.
+    # Shrink and translate contents - aligning the offset centre with the image
+    # dimensional centre.
     offset_scaling_xy = (LOGO_SIZE - abs(offset_xy * 3)) / LOGO_SIZE
     # Lock aspect ratio.
     offset_scaling_xy = np.repeat(min(offset_scaling_xy), 2)
@@ -412,11 +382,17 @@ def _svg_logos(
     )
     artwork_element.attrib["transform"] = matrix_string
 
-    logo_root = ET.Element("svg")
-    logo_root.attrib.update(dict.fromkeys(("width", "height"), str(LOGO_SIZE)))
-    logo_root.append(logo_group)
+    # Take a copy for including in the banner, BEFORE adding final properties.
+    banner_logo = deepcopy(logo_root)
 
-    ###########################################################################
+    logo_root.attrib.update(dict.fromkeys(("width", "height"), str(LOGO_SIZE)))
+    logo_desc = ET.Element("desc")
+    logo_desc.text = (
+        "Logo for the SciTools Iris project - https://github.com/SciTools/iris/"
+    )
+    logo_root.insert(0, logo_desc)
+
+    ############################################################################
     # Make the banner SVG, incorporating the logo SVG.
     banner_height = banner_size_xy[1]
     text_size = banner_height * TEXT_GLOBE_RATIO
@@ -425,7 +401,8 @@ def _svg_logos(
     text_y = banner_height - (banner_height - text_size) / 2
     text_y *= 0.975  # Slight offset
 
-    text_element = ET.Element(
+    text_element = _SvgNamedElement(
+        "text",
         "text",
         attrib={
             "x": str(text_x),
@@ -436,13 +413,19 @@ def _svg_logos(
     )
     text_element.text = banner_text
 
-    banner_root = deepcopy(logo_root)
+    banner_root = _SvgNamedElement("banner", "svg")
     for dimension, name in enumerate(("width", "height")):
         banner_root.attrib[name] = str(banner_size_xy[dimension])
 
+    banner_desc = ET.Element("desc")
+    banner_desc.text = (
+        "Banner logo for the SciTools Iris project - https://github.com/SciTools/iris/"
+    )
+    banner_root.insert(0, banner_desc)
+
     # Left-align the logo.
-    banner_logo_group = banner_root.find("svg", NAMESPACES)
-    banner_logo_group.attrib["preserveAspectRatio"] = "xMinYMin meet"
+    banner_logo.attrib["preserveAspectRatio"] = "xMinYMin meet"
+    banner_root.append(banner_logo)
 
     banner_root.append(text_element)
 
@@ -453,15 +436,15 @@ def _write_svg_file(filename, svg_root, write_dir=None, zip_archive=None):
     """Format the svg then write the svg to a file in write_dir, or
     optionally to an open ZipFile."""
     # Add a credit comment at top of SVG.
-    comment = f"Created by https://github.com/SciTools/marketing/iris/logo/generate_logo.py"
+    comment = (
+        f"Created by https://github.com/SciTools/marketing/iris/logo/generate_logo.py"
+    )
     svg_root.insert(0, ET.Comment(comment))
 
     input_string = ET.tostring(svg_root)
     pretty_xml = minidom.parseString(input_string).toprettyxml()
     # Remove extra empty lines from Matplotlib.
-    pretty_xml = "\n".join(
-        [line for line in pretty_xml.split("\n") if line.strip()]
-    )
+    pretty_xml = "\n".join([line for line in pretty_xml.split("\n") if line.strip()])
 
     if isinstance(zip_archive, ZipFile):
         # Add to zip file if zip_archive provided.
@@ -557,17 +540,13 @@ def generate_logo(
 
         # Logos animated to rotate.
         logos_rotating = _svg_logos(
-            other_elements=svg_elements
-            + svg_land_rotating
-            + land_clip_rotations,
+            other_elements=svg_elements + svg_land_rotating + land_clip_rotations,
             **logo_kwargs,
         )
         for logo_type_ix, suffix in enumerate(logo_names_rotate):
             filename = f"{filename_prefix}-{suffix}.svg"
             logo_write = logos_rotating[logo_type_ix]
-            logo_path = _write_svg_file(
-                filename, logo_write, write_dir=write_dir
-            )
+            logo_path = _write_svg_file(filename, logo_write, write_dir=write_dir)
             written_paths[f"{suffix}_svg"] = logo_path
 
         # A series of fixed logos for each rotation longitude.
@@ -576,9 +555,7 @@ def generate_logo(
         for clip in land_clip_rotations:
             clip.attrib["id"] = fixed_clip_name
         logos_rotated = [
-            _svg_logos(
-                other_elements=svg_elements + svg_land + [clip], **logo_kwargs
-            )
+            _svg_logos(other_elements=svg_elements + svg_land + [clip], **logo_kwargs)
             for clip in land_clip_rotations
         ]
         for logo_type_ix, suffix in enumerate(logo_names_rotate):
@@ -588,9 +565,7 @@ def generate_logo(
                 for ix, logo in enumerate(logos_rotated):
                     logo_write = logo[logo_type_ix]
                     _write_svg_file(
-                        f"{suffix}{ix:03d}",
-                        logo_write,
-                        zip_archive=rotate_zip,
+                        f"{suffix}{ix:03d}", logo_write, zip_archive=rotate_zip,
                     )
 
                 readme_str = (
