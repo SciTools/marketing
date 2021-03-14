@@ -346,7 +346,12 @@ def _svg_land(rotate=False):
 
 
 def _svg_logos(
-    iris_clip, other_elements, offset_xy, banner_size_xy, banner_text,
+    iris_clip,
+    other_elements,
+    offset_xy,
+    banner_size_xy,
+    banner_text,
+    banner_version=None,
 ):
     """Assemble sub-elements into SVG's for the logo and banner."""
     # Make the logo SVG first.
@@ -394,25 +399,6 @@ def _svg_logos(
 
     ############################################################################
     # Make the banner SVG, incorporating the logo SVG.
-    banner_height = banner_size_xy[1]
-    text_size = banner_height * TEXT_GLOBE_RATIO
-    text_x = banner_height + 8
-    # Manual y centring since SVG dominant-baseline not widely supported.
-    text_y = banner_height - (banner_height - text_size) / 2
-    text_y *= 0.975  # Slight offset
-
-    text_element = _SvgNamedElement(
-        "text",
-        "text",
-        attrib={
-            "x": str(text_x),
-            "y": str(text_y),
-            "font-size": f"{text_size}pt",
-            "font-family": "georgia",
-        },
-    )
-    text_element.text = banner_text
-
     banner_root = _SvgNamedElement("banner", "svg")
     for dimension, name in enumerate(("width", "height")):
         banner_root.attrib[name] = str(banner_size_xy[dimension])
@@ -427,7 +413,44 @@ def _svg_logos(
     banner_logo.attrib["preserveAspectRatio"] = "xMinYMin meet"
     banner_root.append(banner_logo)
 
+    # Text element(s).
+    banner_height = banner_size_xy[1]
+    text_size = banner_height * TEXT_GLOBE_RATIO
+    text_x = banner_size_xy[0] - 16
+    # Manual y centring since SVG dominant-baseline not widely supported.
+    text_y = banner_height - (banner_height - text_size) / 2
+    text_y *= 0.975  # Slight offset
+    text_common_attrib = {
+        "x": str(text_x),
+        "font-family": "georgia",
+        "text-anchor": "end",
+    }
+
+    text_element = _SvgNamedElement(
+        "text",
+        "text",
+        attrib=dict(
+            {"y": str(text_y), "font-size": f"{text_size}pt",}, **text_common_attrib
+        ),
+    )
+    text_element.text = banner_text
     banner_root.append(text_element)
+
+    if banner_version is not None:
+        version_size = text_size / 6
+        version_y = text_y + version_size + 16
+        version_element = _SvgNamedElement(
+            "version",
+            "text",
+            attrib=dict(
+                {"y": str(version_y), "font-size": f"{version_size}pt"},
+                **text_common_attrib,
+            ),
+        )
+        version_element.text = banner_version
+        banner_root.append(version_element)
+
+    ############################################################################
 
     return logo_root, banner_root
 
@@ -465,6 +488,7 @@ def generate_logo(
     write_dir=Path.cwd(),
     banner_text="Iris",
     banner_width=588,
+    banner_version=None,
     rotate=False,
 ):
     """Generate the Iris logo and accompanying banner with configurable text.
@@ -482,6 +506,8 @@ def generate_logo(
     banner_width : int
         Pixel width of the banner logo - must be manually adjusted to fit
         `banner_text`.
+    banner_version : str, optional
+        A version string to include in the banner logo. Default is None.
     rotate : bool
         Whether to also generate rotating earth logos.
         NOTE: takes approx 1min to generate this. Animated SVG files are known
@@ -516,6 +542,7 @@ def generate_logo(
         "offset_xy": clip_offset_xy,
         "banner_size_xy": banner_size_xy,
         "banner_text": banner_text,
+        "banner_version": banner_version,
     }
 
     logo_names = ("logo", "logo-title")
