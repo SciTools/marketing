@@ -259,12 +259,23 @@ def _svg_glow() -> List[_SvgNamedElement]:
 
 
 def _svg_land(
-    rotate=False,
-) -> Tuple[List[_SvgNamedElement], List[_SvgNamedElement]]:
+    rotate_fixed: bool = False,
+    rotate_animate: bool = False,
+) -> List[List[_SvgNamedElement]]:
     """
     Generate the circle representing the globe's land in the logo, clipped by
     appropriate coastline shapes (using Matplotlib and Cartopy).
+
+    rotate_fixed = generate a series of independent element sets representing
+        Earth's longitudinal rotation.
+    rotate_animate = generate a single set of elements with the coastline clip
+        animated to represent Earth's longitudinal rotation.
+
     """
+    if rotate_fixed is True and rotate_animate is True:
+        message = "rotate_fixed and rotate_animate are both True - not permitted."
+        raise ValueError(message)
+
     # Set plotting size/proportions.
     mpl_points_per_inch = 72
     plot_inches = LOGO_SIZE / mpl_points_per_inch
@@ -282,6 +293,7 @@ def _svg_land(
     central_longitude = -30
     central_latitude = 22.9
     perspective_tilt = -4.99
+    rotate = rotate_fixed or rotate_animate
     rotation_frames = 180 if rotate else 1
     rotation_longitudes = np.linspace(
         start=central_longitude + 360,
@@ -292,6 +304,7 @@ def _svg_land(
     # Normalise to -180..+180
     rotation_longitudes = (rotation_longitudes + 360.0 + 180.0) % 360.0 - 180.0
 
+    # Create the coastline clips.
     for lon in rotation_longitudes:
         # Use Matplotlib and Cartopy to generate land-shaped SVG clips for each longitude.
         projection_rotated = ccrs.Orthographic(
@@ -329,6 +342,7 @@ def _svg_land(
         land_clips.append(land_clip)
     plt.close()
 
+    # Create the land fill.
     gradient = _SvgGradientElement(
         xml_id="land_gradient", tag="radialGradient", is_def=True
     )
@@ -348,7 +362,10 @@ def _svg_land(
             "transform": f"rotate({perspective_tilt} {logo_centre} {logo_centre})",
         },
     )
-    if rotate:
+
+    # Return a single set of SVG elements for animated or single rotation.
+    result = [[land, gradient, *land_clips]]
+    if rotate_animate:
         animation_values = ";".join([f"url(#{clip.xml_id})" for clip in land_clips])
         frames = len(land_clips)
         duration = frames / 30
@@ -364,7 +381,15 @@ def _svg_land(
                 },
             )
         )
-    return [land, gradient], land_clips
+    elif rotate_fixed:
+        # Return a set of SVG elements for each fixed rotation.
+        fixed_clip_name = "land_clip"
+        land.attrib["clip-path"] = f"url(#{fixed_clip_name})"
+        for clip in land_clips:
+            clip.attrib["id"] = fixed_clip_name
+        result = [[land, gradient, clip] for clip in land_clips]
+
+    return result
 
 
 def _svg_logos(
@@ -583,10 +608,8 @@ def generate_logo(
 
     # Create the main logos.
     # Specialised SVG objects for the land and the coastlines clip.
-    svg_land, land_clip = _svg_land()
-    logos_static = _svg_logos(
-        other_elements=svg_elements + svg_land + land_clip, **logo_kwargs
-    )
+    svg_land = _svg_land()[0]
+    logos_static = _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
     for logo_type_ix, suffix in enumerate(logo_names):
         filename = f"{filename_prefix}-{suffix}.svg"
         logo_write = logos_static[logo_type_ix]
@@ -596,12 +619,11 @@ def generate_logo(
     ###########################################################################
     if rotate:
         logo_names_rotate = [suffix + "_rotate" for suffix in logo_names]
-        svg_land_rotating, land_clip_rotations = _svg_land(rotate=True)
 
         # Logos animated to rotate.
+        svg_land_rotating = _svg_land(rotate_animate=True)[0]
         logos_rotating = _svg_logos(
-            other_elements=svg_elements + svg_land_rotating + land_clip_rotations,
-            **logo_kwargs,
+            other_elements=svg_elements + svg_land_rotating, **logo_kwargs
         )
         for logo_type_ix, suffix in enumerate(logo_names_rotate):
             filename = f"{filename_prefix}-{suffix}.svg"
@@ -610,13 +632,10 @@ def generate_logo(
             written_paths[f"{suffix}_svg"] = logo_path
 
         # A series of fixed logos for each rotation longitude.
-        fixed_clip_name = "land_clip"
-        svg_land[0].attrib["clip-path"] = f"url(#{fixed_clip_name})"
-        for clip in land_clip_rotations:
-            clip.attrib["id"] = fixed_clip_name
+        svg_land_rotations = _svg_land(rotate_fixed=True)
         logos_rotated = [
-            _svg_logos(other_elements=svg_elements + svg_land + [clip], **logo_kwargs)
-            for clip in land_clip_rotations
+            _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
+            for svg_land in svg_land_rotations
         ]
         for logo_type_ix, suffix in enumerate(logo_names_rotate):
             # Insert fixed rotation logos into a ZIP file.
