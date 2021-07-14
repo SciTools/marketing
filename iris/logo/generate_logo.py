@@ -63,6 +63,22 @@ class _SvgNamedElement(ET.Element):
         self.is_def = is_def
 
 
+class _SvgGradientElement(_SvgNamedElement):
+    """`_SvgNamedElement` with convenience method for adding gradient stops."""
+
+    def add_stop(self, offset: float, color: str, opacity: float = None):
+        stop_element = ET.Element(
+            "stop",
+            attrib={
+                "offset": str(offset),
+                "stop-color": color,
+            },
+        )
+        if opacity is not None:
+            stop_element.attrib["stop-opacity"] = str(opacity)
+        self.append(stop_element)
+
+
 def _matrix_transform_string(
     scaling_xy: np.ndarray,
     centre_xy: np.ndarray,
@@ -156,7 +172,7 @@ def _svg_clip() -> Tuple[_SvgNamedElement, np.ndarray]:
 
 def _svg_background() -> List[_SvgNamedElement]:
     """Generate the background rectangle for the logo."""
-    gradient = _SvgNamedElement(
+    gradient = _SvgGradientElement(
         xml_id="background_gradient",
         tag="linearGradient",
         is_def=True,
@@ -165,31 +181,9 @@ def _svg_background() -> List[_SvgNamedElement]:
             "y2": "100%",
         },
     )
-    gradient.extend(
-        [
-            ET.Element(
-                "stop",
-                attrib={
-                    "offset": "0",
-                    "stop-color": "#13385d",
-                },
-            ),
-            ET.Element(
-                "stop",
-                attrib={
-                    "offset": "0.43",
-                    "stop-color": "#0b3849",
-                },
-            ),
-            ET.Element(
-                "stop",
-                attrib={
-                    "offset": "1",
-                    "stop-color": "#272b2c",
-                },
-            ),
-        ]
-    )
+    offset_color = [(0, "#13385d"), (0.43, "#0b3849"), (1, "#272b2c")]
+    for offset, color in offset_color:
+        gradient.add_stop(offset, color)
     background = _SvgNamedElement(
         xml_id="background",
         tag="rect",
@@ -205,24 +199,12 @@ def _svg_background() -> List[_SvgNamedElement]:
 def _svg_sea() -> List[_SvgNamedElement]:
     """Generate the circle representing the globe's sea in the logo."""
     # Not using Cartopy for sea since it doesn't actually render curves/circles.
-    gradient = _SvgNamedElement(
+    gradient = _SvgGradientElement(
         xml_id="sea_gradient", tag="radialGradient", is_def=True
     )
-    gradient.extend(
-        [
-            ET.Element(
-                "stop",
-                attrib={"offset": "0", "stop-color": "#20b0ea"},
-            ),
-            ET.Element(
-                "stop",
-                attrib={
-                    "offset": "1",
-                    "stop-color": "#156475",
-                },
-            ),
-        ]
-    )
+    offset_color = [(0, "#20b0ea"), (1, "#156475")]
+    for offset, color in offset_color:
+        gradient.add_stop(offset, color)
     sea = _SvgNamedElement(
         xml_id="sea",
         tag="circle",
@@ -244,39 +226,19 @@ def _svg_glow() -> List[_SvgNamedElement]:
     matrix_string = _matrix_transform_string(
         gradient_scale_xy, gradient_centre_xy, gradient_translation_xy
     )
-    gradient = _SvgNamedElement(
+    gradient = _SvgGradientElement(
         xml_id="glow_gradient",
         tag="radialGradient",
         is_def=True,
         attrib={"gradientTransform": matrix_string},
     )
-    gradient.extend(
-        [
-            ET.Element(
-                "stop",
-                attrib={
-                    "offset": "0",
-                    "stop-color": "#0aaea7",
-                    "stop-opacity": "0.85882354",
-                },
-            ),
-            ET.Element(
-                "stop",
-                attrib={
-                    "offset": "0.67322218",
-                    "stop-color": "#18685d",
-                    "stop-opacity": "0.74117649",
-                },
-            ),
-            ET.Element(
-                "stop",
-                attrib={
-                    "offset": "1",
-                    "stop-color": "#b6df34",
-                },
-            ),
-        ]
-    )
+    offset_color_opacity = [
+        (0, "#0aaea7", 0.85882354),
+        (0.67322218, "#18685d", 0.74117649),
+        (1, "#b6df34", None),
+    ]
+    for offset, color, opacity in offset_color_opacity:
+        gradient.add_stop(offset, color, opacity)
     blur = _SvgNamedElement(xml_id="glow_blur", tag="filter", is_def=True)
     blur.append(ET.Element("feGaussianBlur", attrib={"stdDeviation": "14"}))
     glow = _SvgNamedElement(
@@ -367,15 +329,12 @@ def _svg_land(
         land_clips.append(land_clip)
     plt.close()
 
-    gradient = _SvgNamedElement(
+    gradient = _SvgGradientElement(
         xml_id="land_gradient", tag="radialGradient", is_def=True
     )
-    gradient.extend(
-        [
-            ET.Element("stop", attrib={"offset": "0", "stop-color": "#d5e488"}),
-            ET.Element("stop", attrib={"offset": "1", "stop-color": "#aec928"}),
-        ]
-    )
+    offset_color = [(0, "#d5e488"), (1, "#aec928")]
+    for offset, color in offset_color:
+        gradient.add_stop(offset, color)
     logo_centre = LOGO_SIZE / 2
     land = _SvgNamedElement(
         xml_id="land",
