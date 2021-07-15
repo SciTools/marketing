@@ -94,6 +94,7 @@ def _get_imagemagick() -> List[str]:
         try:
             _ = run(cmd + ["-h"], check=True, capture_output=True)
             magick_command = cmd
+            break
         except CalledProcessError:
             continue
     if magick_command is not None:
