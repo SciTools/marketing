@@ -86,6 +86,20 @@ class _SvgGradientElement(_SvgNamedElement):
         self.append(stop_element)
 
 
+def _get_imagemagick() -> List[str]:
+    """Determine if the required ImageMagick CLI is on this machine."""
+    magick_commands = (["magick", "convert"], ["convert"])
+    magick_command = None
+    for cmd in magick_commands:
+        try:
+            _ = run(cmd + ["-h"], check=True, capture_output=True)
+            magick_command = cmd
+        except CalledProcessError:
+            continue
+    if magick_command is not None:
+        return magick_command
+
+
 def _matrix_transform_string(
     scaling_xy: np.ndarray,
     centre_xy: np.ndarray,
@@ -416,7 +430,7 @@ def _svg_logos(
     banner_size_xy: np.ndarray,
     banner_text: str,
     banner_version: str = None,
-) -> Tuple[_SvgNamedElement, _SvgNamedElement]:
+) -> Dict[str, _SvgNamedElement]:
     """Assemble sub-elements into SVG's for the logo and banner."""
     # Make the logo SVG first.
     logo_root = _SvgNamedElement(
@@ -517,7 +531,7 @@ def _svg_logos(
 
     ############################################################################
 
-    return logo_root, banner_root
+    return {"logo": logo_root, "logo-title": banner_root}
 
 
 def _write_svg_file(
@@ -612,45 +626,31 @@ def generate_logo(
         "banner_version": banner_version,
     }
 
-    logo_names = ("logo", "logo-title")
     written_paths = {}
-
     # Create the main logos.
     # Specialised SVG objects for the land and the coastlines clip.
     svg_land = _svg_land()[0]
     logos_static = _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
-    for logo_type_ix, suffix in enumerate(logo_names):
-        filename = f"{filename_prefix}-{suffix}.svg"
-        logo_write = logos_static[logo_type_ix]
-        logo_path = _write_svg_file(filename, logo_write, write_dir=write_dir)
-        written_paths[suffix] = logo_path
+    for key, logo in logos_static.items():
+        filename = f"{filename_prefix}-{key}.svg"
+        logo_path = _write_svg_file(filename, logo, write_dir=write_dir)
+        written_paths[key] = logo_path
 
-    ###########################################################################
+    ############################################################################
     if rotate:
-        logo_names_rotate = [suffix + "_rotate" for suffix in logo_names]
-
         # SVG logos animated to rotate.
         svg_land_rotating = _svg_land(rotate_animate=True)[0]
         logos_rotating = _svg_logos(
             other_elements=svg_elements + svg_land_rotating, **logo_kwargs
         )
-        for logo_type_ix, suffix in enumerate(logo_names_rotate):
+        for key, logo in logos_rotating.items():
+            suffix = f"{key}_rotate"
             filename = f"{filename_prefix}-{suffix}.svg"
-            logo_write = logos_rotating[logo_type_ix]
-            logo_path = _write_svg_file(filename, logo_write, write_dir=write_dir)
+            logo_path = _write_svg_file(filename, logo, write_dir=write_dir)
             written_paths[f"{suffix}_svg"] = logo_path
 
         # GIF logos animated to rotate, stitched from static SVG's using ImageMagick.
-        # Check for ImageMagick CLI.
-        magick_commands = (["magick", "convert"], ["convert"])
-        magick_command = None
-        cmd_run_kwargs = dict(check=True, capture_output=True)
-        for cmd in magick_commands:
-            try:
-                _ = run(cmd + ["-h"], **cmd_run_kwargs)
-                magick_command = cmd
-            except CalledProcessError:
-                continue
+        magick_command = _get_imagemagick()
         if magick_command is None:
             message = "ImageMagick CLI not found. Rotating GIFs not created."
             warn(message)
@@ -661,11 +661,14 @@ def generate_logo(
             _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
             for svg_land in svg_land_rotations
         ]
-        for logo_type_ix, suffix in enumerate(logo_names_rotate):
+        logo_types = logos_rotated[0].keys()
+        # Iterate by logo type, then by rotation within each type.
+        for logo_type in logo_types:
+            suffix = f"{logo_type}_rotate"
             with TemporaryDirectory() as write_dir_temp:
                 # Write each static SVG to temp directory.
-                for ix, logo in enumerate(logos_rotated):
-                    logo_write = logo[logo_type_ix]
+                for ix, logo_dict in enumerate(logos_rotated):
+                    logo_write = logo_dict[logo_type]
                     _write_svg_file(
                         f"{suffix}{ix:03d}.svg",
                         logo_write,
@@ -685,7 +688,9 @@ def generate_logo(
                         f"{write_dir_temp}/*.svg",
                         str(logo_path),
                     ]
-                    _ = run(magick_command + magick_kwargs, **cmd_run_kwargs)
+                    _ = run(
+                        magick_command + magick_kwargs, check=True, capture_output=True
+                    )
                     written_paths[f"{suffix}_gif"] = logo_path
 
                 # Write the static rotations to a zip directory.
@@ -693,7 +698,7 @@ def generate_logo(
                 make_archive(zip_path, "zip", write_dir_temp)
                 written_paths[f"{suffix}_zip"] = zip_path
 
-    ###########################################################################
+    ############################################################################
 
     print("LOGO GENERATION COMPLETE")
 
