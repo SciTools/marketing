@@ -480,62 +480,61 @@ def _svg_logos(
 
     ###########################################################################
     # Make the banner SVG, incorporating the logo SVG.
-    for text_colour in ["black", "white"]:
-        banner_root = _SvgNamedElement("banner", "svg")
-        for dimension, name in enumerate(("width", "height")):
-            banner_root.attrib[name] = str(banner_size_xy[dimension])
+    banner_root = _SvgNamedElement("banner", "svg")
+    for dimension, name in enumerate(("width", "height")):
+        banner_root.attrib[name] = str(banner_size_xy[dimension])
 
-        banner_desc = ET.Element("desc")
-        banner_desc.text = (
-            "Banner logo for the SciTools Iris project - "
-            "https://github.com/SciTools/iris/"
-        )
-        banner_root.insert(0, banner_desc)
+    banner_desc = ET.Element("desc")
+    banner_desc.text = (
+        "Banner logo for the SciTools Iris project - "
+        "https://github.com/SciTools/iris/"
+    )
+    banner_root.insert(0, banner_desc)
 
-        # Left-align the logo.
-        banner_logo.attrib["preserveAspectRatio"] = "xMinYMin meet"
-        banner_root.append(banner_logo)
+    # Left-align the logo.
+    banner_logo.attrib["preserveAspectRatio"] = "xMinYMin meet"
+    banner_root.append(banner_logo)
 
-        # Text element(s).
-        banner_height = banner_size_xy[1]
-        text_size = banner_height * TEXT_GLOBE_RATIO
-        text_x = banner_size_xy[0] - (BANNER_HEIGHT / 16)
-        # Manual y centring since SVG dominant-baseline not widely supported.
-        text_y = banner_height - (banner_height - text_size) / 2
-        text_y *= 0.975  # Slight offset
-        text_common_attrib = {
-            "x": str(text_x),
-            "fill": text_colour,
-            "font-family": "georgia",
-            "text-anchor": "end",
-        }
+    # Text element(s).
+    banner_height = banner_size_xy[1]
+    text_size = banner_height * TEXT_GLOBE_RATIO
+    text_x = banner_size_xy[0] - (BANNER_HEIGHT / 16)
+    # Manual y centring since SVG dominant-baseline not widely supported.
+    text_y = banner_height - (banner_height - text_size) / 2
+    text_y *= 0.975  # Slight offset
+    text_common_attrib = {
+        "x": str(text_x),
+        "fill": "#156475",
+        "font-family": "georgia",
+        "text-anchor": "end",
+    }
 
-        text_element = _SvgNamedElement(
-            "text",
+    text_element = _SvgNamedElement(
+        "text",
+        "text",
+        attrib=dict(
+            {"y": str(text_y), "font-size": f"{text_size}pt"},
+            **text_common_attrib,
+        ),
+    )
+    text_element.text = banner_text
+    banner_root.append(text_element)
+
+    if banner_version is not None:
+        version_size = text_size / 6
+        version_y = text_y + version_size + 16
+        version_element = _SvgNamedElement(
+            "version",
             "text",
             attrib=dict(
-                {"y": str(text_y), "font-size": f"{text_size}pt"},
+                {"y": str(version_y), "font-size": f"{version_size}pt"},
                 **text_common_attrib,
             ),
         )
-        text_element.text = banner_text
-        banner_root.append(text_element)
+        version_element.text = banner_version
+        banner_root.append(version_element)
 
-        if banner_version is not None:
-            version_size = text_size / 6
-            version_y = text_y + version_size + 16
-            version_element = _SvgNamedElement(
-                "version",
-                "text",
-                attrib=dict(
-                    {"y": str(version_y), "font-size": f"{version_size}pt"},
-                    **text_common_attrib,
-                ),
-            )
-            version_element.text = banner_version
-            banner_root.append(version_element)
-
-        result[f"logo-title-{text_colour}"] = banner_root
+    result[f"logo-title"] = banner_root
 
     ###########################################################################
 
