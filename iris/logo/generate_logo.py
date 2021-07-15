@@ -500,6 +500,7 @@ def _svg_logos(
     text_y *= 0.975  # Slight offset
     text_common_attrib = {
         "x": str(text_x),
+        "fill": "grey",
         "font-family": "georgia",
         "text-anchor": "end",
     }
