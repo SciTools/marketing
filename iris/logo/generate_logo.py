@@ -33,6 +33,8 @@ BANNER_HEIGHT = 256
 # How much smaller than the globe the banner text should be.
 TEXT_GLOBE_RATIO = 0.6
 
+# Allows re-use of rotating coastline clips - slow to generate.
+COASTLINE_CLIPS_CACHE = []
 
 # XML ElementTree setup.
 NAMESPACES = {"svg": "http://www.w3.org/2000/svg"}
@@ -266,9 +268,9 @@ def _svg_land(
     Generate the circle representing the globe's land in the logo, clipped by
     appropriate coastline shapes (using Matplotlib and Cartopy).
 
-    rotate_fixed = generate a series of independent element sets representing
+    rotate_fixed = generate a series of independent element list representing
         Earth's longitudinal rotation.
-    rotate_animate = generate a single set of elements with the coastline clip
+    rotate_animate = generate a single list of elements with the coastline clip
         animated to represent Earth's longitudinal rotation.
 
     """
@@ -285,10 +287,6 @@ def _svg_land(
     simple_geometries = [geometry.simplify(0.8, True) for geometry in LAND.geometries()]
     LAND.geometries = lambda: iter(simple_geometries)
 
-    # Variable that will store the sequence of land-shaped SVG clips for
-    # each longitude.
-    land_clips = []
-
     # Create a sequence of longitude values.
     central_longitude = -30
     central_latitude = 22.9
@@ -304,43 +302,57 @@ def _svg_land(
     # Normalise to -180..+180
     rotation_longitudes = (rotation_longitudes + 360.0 + 180.0) % 360.0 - 180.0
 
-    # Create the coastline clips.
-    for lon in rotation_longitudes:
-        # Use Matplotlib and Cartopy to generate land-shaped SVG clips for each longitude.
-        projection_rotated = ccrs.Orthographic(
-            central_longitude=lon, central_latitude=central_latitude
-        )
+    # Generate/re-use coastline SVG clip(s) for each longitude.
+    global COASTLINE_CLIPS_CACHE
+    if rotate and COASTLINE_CLIPS_CACHE:
+        # Re-use rotating coastline clips if possible due to slow generation.
+        land_clips = COASTLINE_CLIPS_CACHE
+    else:
+        # Freshly generate coastline clips.
+        land_clips = []
 
-        # Use constants set earlier to achieve desired dimensions.
-        plt.figure(0, figsize=[plot_inches] * 2)
-        ax = plt.subplot(projection=projection_rotated)
-        plt.subplots_adjust(
-            left=plot_padding,
-            bottom=plot_padding,
-            right=1 - plot_padding,
-            top=1 - plot_padding,
-        )
-        ax.add_feature(LAND)
+        # Create the coastline clips.
+        for lon in rotation_longitudes:
+            # Use Matplotlib and Cartopy to generate land-shaped SVG clips for
+            #  each longitude.
+            projection_rotated = ccrs.Orthographic(
+                central_longitude=lon, central_latitude=central_latitude
+            )
 
-        # Save as SVG and extract the resultant code.
-        svg_bytes = BytesIO()
-        plt.savefig(svg_bytes, format="svg")
-        svg_mpl = ET.fromstring(svg_bytes.getvalue())
+            # Use constants set earlier to achieve desired dimensions.
+            plt.figure(0, figsize=[plot_inches] * 2)
+            ax = plt.subplot(projection=projection_rotated)
+            plt.subplots_adjust(
+                left=plot_padding,
+                bottom=plot_padding,
+                right=1 - plot_padding,
+                top=1 - plot_padding,
+            )
+            ax.add_feature(LAND)
 
-        # Find land paths and convert to clip paths.
-        land_clip = _SvgNamedElement(
-            xml_id=f"land_clip_{lon}",
-            tag="clipPath",
-            is_def=True,
-        )
-        mpl_land = svg_mpl.find(".//svg:g[@id='figure_1']", NAMESPACES)
-        land_paths = mpl_land.find(".//svg:g[@id='PathCollection_1']", NAMESPACES)
-        land_clip.extend(list(land_paths))
-        for path in land_clip:
-            # Remove all other attribute items.
-            path.attrib = {"d": path.attrib["d"], "stroke-linejoin": "round"}
-        land_clips.append(land_clip)
-    plt.close()
+            # Save as SVG and extract the resultant code.
+            svg_bytes = BytesIO()
+            plt.savefig(svg_bytes, format="svg")
+            svg_mpl = ET.fromstring(svg_bytes.getvalue())
+
+            # Find land paths and convert to clip paths.
+            land_clip = _SvgNamedElement(
+                xml_id=f"land_clip_{lon}",
+                tag="clipPath",
+                is_def=True,
+            )
+            mpl_land = svg_mpl.find(".//svg:g[@id='figure_1']", NAMESPACES)
+            land_paths = mpl_land.find(".//svg:g[@id='PathCollection_1']", NAMESPACES)
+            land_clip.extend(list(land_paths))
+            for path in land_clip:
+                # Remove all other attribute items.
+                path.attrib = {"d": path.attrib["d"], "stroke-linejoin": "round"}
+            land_clips.append(land_clip)
+        plt.close()
+
+    if rotate:
+        # Cache the generated coastline clips if they were a full rotating set.
+        COASTLINE_CLIPS_CACHE = land_clips
 
     # Create the land fill.
     gradient = _SvgGradientElement(
@@ -477,10 +489,7 @@ def _svg_logos(
         "text",
         "text",
         attrib=dict(
-            {
-                "y": str(text_y),
-                "font-size": f"{text_size}pt",
-            },
+            {"y": str(text_y), "font-size": f"{text_size}pt"},
             **text_common_attrib,
         ),
     )
@@ -637,6 +646,7 @@ def generate_logo(
             _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
             for svg_land in svg_land_rotations
         ]
+        # magick convert -delay 3.3333 -dispose background -background none iris-logo-title_rotate/* iamanimating.gif
         for logo_type_ix, suffix in enumerate(logo_names_rotate):
             # Insert fixed rotation logos into a ZIP file.
             zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.zip")
