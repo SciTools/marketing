@@ -8,7 +8,7 @@ from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 from shutil import make_archive
-from subprocess import CalledProcessError, run
+from subprocess import CalledProcessError, PIPE, run
 from tempfile import TemporaryDirectory
 from typing import Dict, Iterable, List, Tuple, Union
 from warnings import warn
@@ -86,19 +86,19 @@ class _SvgGradientElement(_SvgNamedElement):
         self.append(stop_element)
 
 
-def _get_imagemagick() -> List[str]:
-    """Determine if the required ImageMagick CLI is on this machine."""
-    magick_commands = (["magick", "convert"], ["convert"])
-    magick_command = None
+def _imagemagick_run(*args):
+    """Try two different possible ImageMagick CLI commands."""
+    magick_commands = [["convert"], ["magick", "convert"]]
+    success = False
     for cmd in magick_commands:
         try:
-            _ = run(cmd + ["-h"], check=True, capture_output=True)
-            magick_command = cmd
+            run(cmd + list(args), check=True, stdout=PIPE, stderr=PIPE)
+            success = True
             break
-        except CalledProcessError:
+        except (FileNotFoundError, CalledProcessError):
             continue
-    if magick_command is not None:
-        return magick_command
+    if not success:
+        raise RuntimeError
 
 
 def _matrix_transform_string(
@@ -476,7 +476,7 @@ def _svg_logos(
     )
     logo_root.insert(0, logo_desc)
 
-    ############################################################################
+    ###########################################################################
     # Make the banner SVG, incorporating the logo SVG.
     banner_root = _SvgNamedElement("banner", "svg")
     for dimension, name in enumerate(("width", "height")):
@@ -531,7 +531,7 @@ def _svg_logos(
         version_element.text = banner_version
         banner_root.append(version_element)
 
-    ############################################################################
+    ###########################################################################
 
     return {"logo": logo_root, "logo-title": banner_root}
 
@@ -638,7 +638,7 @@ def generate_logo(
         logo_path = _write_svg_file(filename, logo, write_dir=write_dir)
         written_paths[key] = logo_path
 
-    ############################################################################
+    ###########################################################################
     if rotate:
         # SVG logos animated to rotate.
         svg_land_rotating = _svg_land(rotate_animate=True)[0]
@@ -652,11 +652,6 @@ def generate_logo(
             written_paths[f"{suffix}_svg"] = logo_path
 
         # GIF logos animated to rotate, stitched from static SVG's using ImageMagick.
-        magick_command = _get_imagemagick()
-        if magick_command is None:
-            message = "ImageMagick CLI not found. Rotating GIFs not created."
-            warn(message)
-
         # Create static rotation SVG's.
         svg_land_rotations = _svg_land(rotate_fixed=True)
         logos_rotated = [
@@ -678,29 +673,30 @@ def generate_logo(
                     )
 
                 # Stitch the static SVG's into a rotating GIF.
-                if magick_command is not None:
-                    logo_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.gif")
-                    magick_kwargs = [
-                        "-delay",
-                        str(100 / ROTATION_FPS),
-                        "-dispose",
-                        "background",
-                        "-background",
-                        "none",
-                        f"{write_dir_temp}/*.svg",
-                        str(logo_path),
-                    ]
-                    _ = run(
-                        magick_command + magick_kwargs, check=True, capture_output=True
-                    )
+                logo_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.gif")
+                magick_args = [
+                    "-delay",
+                    str(100 / ROTATION_FPS),
+                    "-dispose",
+                    "background",
+                    "-background",
+                    "none",
+                    f"{write_dir_temp}/*.svg",
+                    str(logo_path),
+                ]
+                try:
+                    _imagemagick_run(*magick_args)
                     written_paths[f"{suffix}_gif"] = logo_path
+                except RuntimeError:
+                    message = "ImageMagick CLI not found. Rotating GIFs not created."
+                    warn(message)
 
                 # Write the static rotations to a zip directory.
                 zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}")
                 make_archive(zip_path, "zip", write_dir_temp)
                 written_paths[f"{suffix}_zip"] = zip_path
 
-    ############################################################################
+    ###########################################################################
 
     print("LOGO GENERATION COMPLETE")
 
