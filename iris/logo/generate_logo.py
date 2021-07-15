@@ -7,10 +7,13 @@ from argparse import ArgumentParser
 from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
+from shutil import make_archive
+from subprocess import CalledProcessError, run
+from tempfile import TemporaryDirectory
 from typing import Dict, Iterable, List, Tuple, Union
+from warnings import warn
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
-from zipfile import ZipFile
 
 from cartopy import crs as ccrs
 from cartopy.feature import LAND
@@ -32,6 +35,8 @@ LOGO_SIZE = 1024
 BANNER_HEIGHT = 256
 # How much smaller than the globe the banner text should be.
 TEXT_GLOBE_RATIO = 0.6
+# Frame rate for rotating logos.
+ROTATION_FPS = 30
 
 # Allows re-use of rotating coastline clips - slow to generate.
 COASTLINE_CLIPS_CACHE = []
@@ -380,7 +385,7 @@ def _svg_land(
     if rotate_animate:
         animation_values = ";".join([f"url(#{clip.xml_id})" for clip in land_clips])
         frames = len(land_clips)
-        duration = frames / 30
+        duration = frames / ROTATION_FPS
         land.append(
             ET.Element(
                 "animate",
@@ -475,7 +480,7 @@ def _svg_logos(
     # Text element(s).
     banner_height = banner_size_xy[1]
     text_size = banner_height * TEXT_GLOBE_RATIO
-    text_x = banner_size_xy[0] - 16
+    text_x = banner_size_xy[0] - (BANNER_HEIGHT / 16)
     # Manual y centring since SVG dominant-baseline not widely supported.
     text_y = banner_height - (banner_height - text_size) / 2
     text_y *= 0.975  # Slight offset
@@ -519,10 +524,8 @@ def _write_svg_file(
     filename: str,
     svg_root: _SvgNamedElement,
     write_dir: Union[Path, str] = None,
-    zip_archive: ZipFile = None,
 ) -> Path:
-    """Format the svg then write the svg to a file in write_dir, or
-    optionally to an open ZipFile."""
+    """Format the svg then write the svg to a file in write_dir."""
     # Add a credit comment at top of SVG.
     comment = (
         f"Created by https://github.com/SciTools/marketing/iris/logo/generate_logo.py"
@@ -534,18 +537,14 @@ def _write_svg_file(
     # Remove extra empty lines from Matplotlib.
     pretty_xml = "\n".join([line for line in pretty_xml.split("\n") if line.strip()])
 
-    if isinstance(zip_archive, ZipFile):
-        # Add to zip file if zip_archive provided.
-        zip_archive.writestr(filename, pretty_xml)
-        result = Path(zip_archive.filename)
-    elif Path(write_dir).is_dir():
+    if Path(write_dir).is_dir():
         # Otherwise write to file normally.
         write_path = write_dir.joinpath(filename)
         with open(write_path, "w") as f:
             f.write(pretty_xml)
         result = write_path
     else:
-        raise ValueError("No valid write_dir or zip_archive provided.")
+        raise ValueError("No valid write_dir provided.")
 
     return result
 
@@ -577,8 +576,9 @@ def generate_logo(
         A version string to include in the banner logo. Default is None.
     rotate : bool
         Whether to also generate rotating earth logos.
-        NOTE: takes approx 1min to generate this. Also, animated SVG files are
-              known to cause high web-browser CPU demand.
+        NOTE: takes several minutes to generate this. Also, animated SVG files
+              are known to cause high web-browser CPU demand - consider using
+              the lower quality GIF files.
 
     Returns
     -------
@@ -629,7 +629,7 @@ def generate_logo(
     if rotate:
         logo_names_rotate = [suffix + "_rotate" for suffix in logo_names]
 
-        # Logos animated to rotate.
+        # SVG logos animated to rotate.
         svg_land_rotating = _svg_land(rotate_animate=True)[0]
         logos_rotating = _svg_logos(
             other_elements=svg_elements + svg_land_rotating, **logo_kwargs
@@ -640,34 +640,58 @@ def generate_logo(
             logo_path = _write_svg_file(filename, logo_write, write_dir=write_dir)
             written_paths[f"{suffix}_svg"] = logo_path
 
-        # A series of fixed logos for each rotation longitude.
+        # GIF logos animated to rotate, stitched from static SVG's using ImageMagick.
+        # Check for ImageMagick CLI.
+        magick_commands = (["magick", "convert"], ["convert"])
+        magick_command = None
+        cmd_run_kwargs = dict(check=True, capture_output=True)
+        for cmd in magick_commands:
+            try:
+                _ = run(cmd + ["-h"], **cmd_run_kwargs)
+                magick_command = cmd
+            except CalledProcessError:
+                continue
+        if magick_command is None:
+            message = "ImageMagick CLI not found. Rotating GIFs not created."
+            warn(message)
+
+        # Create static rotation SVG's.
         svg_land_rotations = _svg_land(rotate_fixed=True)
         logos_rotated = [
             _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
             for svg_land in svg_land_rotations
         ]
-        # magick convert -delay 3.3333 -dispose background -background none iris-logo-title_rotate/* iamanimating.gif
         for logo_type_ix, suffix in enumerate(logo_names_rotate):
-            # Insert fixed rotation logos into a ZIP file.
-            zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.zip")
-            with ZipFile(zip_path, "w") as rotate_zip:
+            with TemporaryDirectory() as write_dir_temp:
+                # Write each static SVG to temp directory.
                 for ix, logo in enumerate(logos_rotated):
                     logo_write = logo[logo_type_ix]
                     _write_svg_file(
-                        f"{suffix}{ix:03d}",
+                        f"{suffix}{ix:03d}.svg",
                         logo_write,
-                        zip_archive=rotate_zip,
+                        write_dir=Path(write_dir_temp),
                     )
 
-                readme_str = (
-                    "Several tools are available to stitch these "
-                    "images into a rotating GIF.\n\nE.g. "
-                    "http://blog.gregzaal.com/2015/08/06/making-an"
-                    "-optimized-gif-in-gimp/"
-                )
-                rotate_zip.writestr("_README.txt", readme_str)
+                # Stitch the static SVG's into a rotating GIF.
+                if magick_command is not None:
+                    logo_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.gif")
+                    magick_kwargs = [
+                        "-delay",
+                        str(100 / ROTATION_FPS),
+                        "-dispose",
+                        "background",
+                        "-background",
+                        "none",
+                        f"{write_dir_temp}/*.svg",
+                        str(logo_path),
+                    ]
+                    _ = run(magick_command + magick_kwargs, **cmd_run_kwargs)
+                    written_paths[f"{suffix}_gif"] = logo_path
 
-            written_paths[f"{suffix}_zip"] = zip_path
+                # Write the static rotations to a zip directory.
+                zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}")
+                make_archive(zip_path, "zip", write_dir_temp)
+                written_paths[f"{suffix}_zip"] = zip_path
 
     ###########################################################################
 
