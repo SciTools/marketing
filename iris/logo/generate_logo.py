@@ -498,7 +498,7 @@ def _svg_logos(
     # Text element(s).
     banner_height = banner_size_xy[1]
     text_size = banner_height * TEXT_GLOBE_RATIO
-    text_x = banner_size_xy[0] - (BANNER_HEIGHT / 16)
+    text_x = banner_size_xy[0] - (banner_height / 16)
     # Manual y centring since SVG dominant-baseline not widely supported.
     text_y = banner_height - (banner_height - text_size) / 2
     text_y *= 0.975  # Slight offset
@@ -522,7 +522,7 @@ def _svg_logos(
 
     if banner_version is not None:
         version_size = text_size / 6
-        version_y = text_y + version_size + 16
+        version_y = text_y + version_size + (banner_height / 16)
         version_element = _SvgNamedElement(
             "version",
             "text",
@@ -559,7 +559,6 @@ def _write_svg_file(
     pretty_xml = "\n".join([line for line in pretty_xml.split("\n") if line.strip()])
 
     if Path(write_dir).is_dir():
-        # Otherwise write to file normally.
         write_path = write_dir.joinpath(filename)
         with open(write_path, "w") as f:
             f.write(pretty_xml)
@@ -610,6 +609,7 @@ def generate_logo(
 
     print("LOGO GENERATION START ...")
 
+    # Sanitise inputs that may have come from command line.
     write_dir = Path(write_dir)
     banner_width = int(banner_width)
     rotate = bool(rotate)
@@ -679,18 +679,17 @@ def generate_logo(
 
                 # Stitch the static SVG's into a rotating GIF.
                 logo_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.gif")
-                magick_args = [
-                    "-delay",
-                    str(100 / ROTATION_FPS),
-                    "-dispose",
-                    "background",
-                    "-background",
-                    "none",
-                    f"{write_dir_temp}/*.svg",
-                    str(logo_path),
-                ]
                 try:
-                    _imagemagick_run(*magick_args)
+                    _imagemagick_run(
+                        "-delay",
+                        str(100 / ROTATION_FPS),
+                        "-dispose",
+                        "background",
+                        "-background",
+                        "none",
+                        f"{write_dir_temp}/*.svg",
+                        str(logo_path),
+                    )
                     written_paths[f"{suffix}_gif"] = logo_path
                 except RuntimeError:
                     message = "ImageMagick CLI not found. Rotating GIFs not created."
