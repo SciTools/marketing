@@ -6,6 +6,9 @@ Uses `xml.ElementTree` for SVG file editing.
 from argparse import ArgumentParser
 from copy import deepcopy
 from io import BytesIO
+import inspect
+import logging
+import os
 from pathlib import Path
 from shutil import make_archive
 from subprocess import CalledProcessError, PIPE, run
@@ -37,6 +40,12 @@ BANNER_HEIGHT = 256
 TEXT_GLOBE_RATIO = 0.6
 # Frame rate for rotating logos.
 ROTATION_FPS = 30
+# define colours for logo variants
+LOGO_COLOUR_LIGHT = "#156475"
+LOGO_COLOUR_DARK = "#B5CE3A"
+COLOUR_INFO = [ { 'colour': LOGO_COLOUR_LIGHT, 'postfix': "" },
+                { 'colour': LOGO_COLOUR_DARK, 'postfix': "dark" },
+                ]
 
 # Allows re-use of rotating coastline clips - slow to generate.
 COASTLINE_CLIPS_CACHE = []
@@ -44,6 +53,26 @@ COASTLINE_CLIPS_CACHE = []
 # XML ElementTree setup.
 NAMESPACES = {"svg": "http://www.w3.org/2000/svg"}
 ET.register_namespace("", NAMESPACES["svg"])
+
+# set logging level (NOTSET, DEBUG, INFO, WARNING, ERROR, CRITICAL)
+logging.basicConfig(level=logging.INFO)
+
+
+def autolog_debug(message):
+    # Get the previous frame in the stack, otherwise it would
+    # be this function.
+    func = inspect.currentframe().f_back.f_code
+    head, file_name = os.path.split(func.co_filename)
+    # Dump the message + the name of this function to the log.
+    logging.debug(
+        "%s in %s:%i \n    --> %s"
+        % (func.co_name, file_name, func.co_firstlineno, message)
+    )
+
+
+def autolog_info(message):
+    # Dump the message + the name of this function to the log.
+    logging.info(" --> {}".format(message))
 
 
 class _SvgNamedElement(ET.Element):
@@ -431,6 +460,9 @@ def _svg_logos(
     banner_size_xy: np.ndarray,
     banner_text: str,
     banner_version: str = None,
+    logo_text_colour: str = LOGO_COLOUR_LIGHT,
+    logo_postfix: str = None,
+
 ) -> Dict[str, _SvgNamedElement]:
     """Assemble sub-elements into SVG's for the logo and banner."""
     # Make the logo SVG first.
@@ -476,7 +508,10 @@ def _svg_logos(
     )
     logo_root.insert(0, logo_desc)
 
-    result = {"logo": logo_root}
+    if len(logo_postfix) > 0:
+        result = {f"logo-{logo_postfix}": logo_root}
+    else:
+        result = {"logo": logo_root}
 
     ###########################################################################
     # Make the banner SVG, incorporating the logo SVG.
@@ -504,7 +539,7 @@ def _svg_logos(
     text_y *= 0.975  # Slight offset
     text_common_attrib = {
         "x": str(text_x),
-        "fill": "#156475",
+        "fill": logo_text_colour,
         "font-family": "georgia",
         "text-anchor": "end",
     }
@@ -534,7 +569,10 @@ def _svg_logos(
         version_element.text = banner_version
         banner_root.append(version_element)
 
-    result[f"logo-title"] = banner_root
+    if len(logo_postfix) > 0:
+        result[f"logo-title-{logo_postfix}"] = banner_root
+    else:
+        result[f"logo-title"] = banner_root
 
     ###########################################################################
 
@@ -607,7 +645,7 @@ def generate_logo(
 
     """
 
-    print("LOGO GENERATION START ...")
+    autolog_info("LOGO GENERATION START ...")
 
     # Sanitise inputs that may have come from command line.
     write_dir = Path(write_dir)
@@ -625,84 +663,93 @@ def generate_logo(
     # _svg_logo(). Ordering is important.
     svg_elements = [*_svg_background(), *_svg_glow(), *_svg_sea()]
 
-    logo_kwargs = {
-        "iris_clip": iris_clip,
-        "offset_xy": clip_offset_xy,
-        "banner_size_xy": banner_size_xy,
-        "banner_text": banner_text,
-        "banner_version": banner_version,
-    }
+    # --------------------------------------------------
+    # generate the logo for colour variant (light, dark)
 
     written_paths = {}
-    # Create the main logos.
-    # Specialised SVG objects for the land and the coastlines clip.
-    svg_land = _svg_land()[0]
-    logos_static = _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
-    for key, logo in logos_static.items():
-        filename = f"{filename_prefix}-{key}.svg"
-        logo_path = _write_svg_file(filename, logo, write_dir=write_dir)
-        written_paths[key] = logo_path
 
-    ###########################################################################
-    if rotate:
-        # SVG logos animated to rotate.
-        svg_land_rotating = _svg_land(rotate_animate=True)[0]
-        logos_rotating = _svg_logos(
-            other_elements=svg_elements + svg_land_rotating, **logo_kwargs
-        )
-        for key, logo in logos_rotating.items():
-            suffix = f"{key}_rotate"
-            filename = f"{filename_prefix}-{suffix}.svg"
+    for c in COLOUR_INFO:
+        logo_kwargs = {
+            "iris_clip": iris_clip,
+            "offset_xy": clip_offset_xy,
+            "banner_size_xy": banner_size_xy,
+            "banner_text": banner_text,
+            "banner_version": banner_version,
+            "logo_text_colour" : c['colour'],
+            "logo_postfix" : c['postfix'],
+        }
+
+        # Create the main logos.
+        # Specialised SVG objects for the land and the coastlines clip.
+        svg_land = _svg_land()[0]
+        logos_static = _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
+
+        for key, logo in logos_static.items():
+            filename = f"{filename_prefix}-{key}.svg"
+            autolog_info(f"Writing {filename}")
             logo_path = _write_svg_file(filename, logo, write_dir=write_dir)
-            written_paths[f"{suffix}_svg"] = logo_path
+            written_paths[key] = logo_path
 
-        # GIF logos animated to rotate, stitched from static SVG's using ImageMagick.
-        # Create static rotation SVG's.
-        svg_land_rotations = _svg_land(rotate_fixed=True)
-        logos_rotated = [
-            _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
-            for svg_land in svg_land_rotations
-        ]
-        logo_types = logos_rotated[0].keys()
-        # Iterate by logo type, then by rotation within each type.
-        for logo_type in logo_types:
-            suffix = f"{logo_type}_rotate"
-            with TemporaryDirectory() as write_dir_temp:
-                # Write each static SVG to temp directory.
-                for ix, logo_dict in enumerate(logos_rotated):
-                    logo_write = logo_dict[logo_type]
-                    _write_svg_file(
-                        f"{suffix}{ix:03d}.svg",
-                        logo_write,
-                        write_dir=Path(write_dir_temp),
-                    )
+        ###########################################################################
+        if rotate:
+            # SVG logos animated to rotate.
+            svg_land_rotating = _svg_land(rotate_animate=True)[0]
+            logos_rotating = _svg_logos(
+                other_elements=svg_elements + svg_land_rotating, **logo_kwargs
+            )
+            for key, logo in logos_rotating.items():
+                suffix = f"{key}_rotate"
+                filename = f"{filename_prefix}-{suffix}.svg"
+                logo_path = _write_svg_file(filename, logo, write_dir=write_dir)
+                written_paths[f"{suffix}_svg"] = logo_path
 
-                # Stitch the static SVG's into a rotating GIF.
-                logo_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.gif")
-                try:
-                    _imagemagick_run(
-                        "-delay",
-                        str(100 / ROTATION_FPS),
-                        "-dispose",
-                        "background",
-                        "-background",
-                        "none",
-                        f"{write_dir_temp}/*.svg",
-                        str(logo_path),
-                    )
-                    written_paths[f"{suffix}_gif"] = logo_path
-                except RuntimeError:
-                    message = "ImageMagick CLI not found. Rotating GIFs not created."
-                    warn(message)
+            # GIF logos animated to rotate, stitched from static SVG's using ImageMagick.
+            # Create static rotation SVG's.
+            svg_land_rotations = _svg_land(rotate_fixed=True)
+            logos_rotated = [
+                _svg_logos(other_elements=svg_elements + svg_land, **logo_kwargs)
+                for svg_land in svg_land_rotations
+            ]
+            logo_types = logos_rotated[0].keys()
+            # Iterate by logo type, then by rotation within each type.
+            for logo_type in logo_types:
+                suffix = f"{logo_type}_rotate"
+                with TemporaryDirectory() as write_dir_temp:
+                    # Write each static SVG to temp directory.
+                    for ix, logo_dict in enumerate(logos_rotated):
+                        logo_write = logo_dict[logo_type]
+                        _write_svg_file(
+                            f"{suffix}{ix:03d}.svg",
+                            logo_write,
+                            write_dir=Path(write_dir_temp),
+                        )
 
-                # Write the static rotations to a zip directory.
-                zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}")
-                make_archive(zip_path, "zip", write_dir_temp)
-                written_paths[f"{suffix}_zip"] = zip_path
+                    # Stitch the static SVG's into a rotating GIF.
+                    logo_path = write_dir.joinpath(f"{filename_prefix}-{suffix}.gif")
+                    try:
+                        _imagemagick_run(
+                            "-delay",
+                            str(100 / ROTATION_FPS),
+                            "-dispose",
+                            "background",
+                            "-background",
+                            "none",
+                            f"{write_dir_temp}/*.svg",
+                            str(logo_path),
+                        )
+                        written_paths[f"{suffix}_gif"] = logo_path
+                    except RuntimeError:
+                        message = "ImageMagick CLI not found. Rotating GIFs not created."
+                        warn(message)
 
-    ###########################################################################
+                    # Write the static rotations to a zip directory.
+                    zip_path = write_dir.joinpath(f"{filename_prefix}-{suffix}")
+                    make_archive(zip_path, "zip", write_dir_temp)
+                    written_paths[f"{suffix}_zip"] = zip_path
 
-    print("LOGO GENERATION COMPLETE")
+        ###########################################################################
+
+    autolog_info("LOGO GENERATION COMPLETE")
 
     return written_paths
 
@@ -724,7 +771,7 @@ def main():
     keys = [key[2:] for key in keys]
     kwargs = dict(zip(keys, values))
 
-    print(generate_logo(**kwargs))
+    autolog_info(generate_logo(**kwargs))
 
 
 if __name__ == "__main__":
